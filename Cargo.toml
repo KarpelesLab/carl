@@ -1,0 +1,26 @@
+[package]
+name = "manu"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Manu — a multipurpose MCP helper that gives AI agents hands: wallets, email, and more, over stdio."
+repository = "https://github.com/KarpelesLab/manu"
+readme = "README.md"
+keywords = ["mcp", "ai", "agent", "wallet", "email"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+rmcp = { version = "1.8", features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[profile.release]
+strip = true
+lto = "thin"

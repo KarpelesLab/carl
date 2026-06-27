@@ -1,0 +1,11 @@
+# Rust build artifacts
+/target
+
+# Local environment / secrets — Manu may hold key material; never commit it
+/.manu
+*.env
+.env.local
+
+# Editor / OS noise
+*.swp
+.DS_Store
