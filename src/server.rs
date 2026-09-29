@@ -66,7 +66,7 @@ impl Carl {
     pub fn new(config: Config) -> Self {
         Self {
             google: Arc::new(Google::new(&config.data_dir)),
-            agents: Arc::new(Agents::default()),
+            agents: Arc::new(Agents::new(Some(config.data_dir.join("sessions")))),
             session: None,
             areas: Arc::new(Mutex::new(areas::initial(config.areas.as_deref()))),
             config: Arc::new(config),
@@ -83,11 +83,15 @@ impl Carl {
     }
 
     /// This server as seen from agent `id`'s session: same shared state, its
-    /// own set of areas (from the shim's `CARL_AREAS`, else the defaults).
-    pub fn for_session(&self, id: u32, areas: Option<&str>) -> Self {
+    /// own set of areas: those it had before a daemon restart (`restored`),
+    /// else the shim's `CARL_AREAS`, else the defaults.
+    pub fn for_session(&self, id: u32, restored: Option<&[String]>, env: Option<&str>) -> Self {
+        let areas = restored
+            .and_then(areas::restore)
+            .unwrap_or_else(|| areas::initial(env));
         Self {
             session: Some(id),
-            areas: Arc::new(Mutex::new(areas::initial(areas))),
+            areas: Arc::new(Mutex::new(areas)),
             ..self.clone()
         }
     }

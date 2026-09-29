@@ -190,6 +190,13 @@ fn reconnect(
     if let Some(initialized) = link.initialized.clone() {
         link.writer
             .write_all(format!("{initialized}\n").as_bytes())?;
+        // The new daemon may expose other tools (an update added some, or the
+        // session's areas changed): have the client fetch the list again.
+        writeln!(
+            stdout,
+            r#"{{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}}"#
+        )?;
+        stdout.flush()?;
     }
     tracing::info!("reconnected to the carl daemon");
     Ok(reader)

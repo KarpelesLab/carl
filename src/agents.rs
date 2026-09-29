@@ -1,17 +1,26 @@
 //! Registry of the agents connected to the daemon, and their message inboxes.
 //!
 //! Each shim connection is one agent. Its id is the shim's pid, so it stays
-//! the same when the shim reconnects after a daemon restart; what the agent
-//! said about itself and its unread messages live in daemon memory and do not
-//! survive a restart.
+//! the same when the shim reconnects after a daemon restart. What an agent
+//! set up (enabled areas, the name and task it gave, unread messages) is also
+//! saved under `<data dir>/sessions/`, keyed by the shim's pid and start time,
+//! and restored when that shim reconnects: a daemon update or crash doesn't
+//! reset anyone's session. A clean disconnect deletes the file.
 
 use std::{
     collections::{HashMap, VecDeque},
+    fs,
+    io::Write,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use anyhow::{Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
@@ -30,6 +39,11 @@ const MAX_TASK_CHARS: usize = 500;
 #[derive(Default)]
 pub struct Agents {
     inner: Mutex<Inner>,
+    /// Where session state is saved; `None` keeps it in memory only.
+    dir: Option<PathBuf>,
+    /// Set as the daemon exits: sessions ending then will resume elsewhere,
+    /// so their saved state is kept.
+    shutting_down: AtomicBool,
 }
 
 #[derive(Default)]
@@ -40,6 +54,8 @@ struct Inner {
 
 struct Agent {
     id: u32,
+    /// `<pid>-<start time>` of the shim: names its saved state.
+    key: Option<String>,
     /// Chosen by the agent, else derived from its client and directory.
     name: String,
     named: bool,
@@ -53,9 +69,26 @@ struct Agent {
     task: Option<String>,
     connected_at: u64,
     task_updated_at: Option<u64>,
+    /// Enabled tool areas, once the session changed them.
+    areas: Option<Vec<String>>,
     inbox: VecDeque<Value>,
     /// Wakes a pending `agent_inbox` wait.
     notify: Arc<Notify>,
+}
+
+/// What survives a daemon restart.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Saved {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    task: Option<String>,
+    #[serde(default)]
+    task_updated_at: Option<u64>,
+    #[serde(default)]
+    areas: Option<Vec<String>>,
+    #[serde(default)]
+    inbox: Vec<Value>,
 }
 
 impl Agent {
@@ -72,32 +105,68 @@ impl Agent {
             "connected_at": rfc3339(self.connected_at),
         })
     }
+
+    fn saved(&self) -> Saved {
+        Saved {
+            // A default name is rebuilt from the client on reconnect.
+            name: self.named.then(|| self.name.clone()),
+            task: self.task.clone(),
+            task_updated_at: self.task_updated_at,
+            areas: self.areas.clone(),
+            inbox: self.inbox.iter().cloned().collect(),
+        }
+    }
 }
 
 impl Agents {
-    /// Register a new connection; returns its agent id.
-    pub fn register(&self, hello: &ClientHello) -> u32 {
+    /// A registry saving session state under `dir`.
+    pub fn new(dir: Option<PathBuf>) -> Self {
+        Self {
+            dir,
+            ..Self::default()
+        }
+    }
+
+    /// Register a new connection. Returns its agent id, and the tool areas
+    /// its previous session had enabled, if it is resuming one.
+    pub fn register(&self, hello: &ClientHello) -> (u32, Option<Vec<String>>) {
         let dir = hello
             .cwd
             .as_ref()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "agent".into());
+        let key = process_key(hello.pid);
+        let saved = key
+            .as_deref()
+            .and_then(|k| self.load(k))
+            .unwrap_or_default();
+
+        let mut inner = self.inner.lock().unwrap();
+        // Keep a saved name unless someone took it in the meantime.
+        let name = saved
+            .name
+            .filter(|n| !inner.agents.values().any(|a| &a.name == n));
         let agent = Agent {
             id: hello.pid,
-            name: dir,
-            named: false,
+            key,
+            named: name.is_some(),
+            name: name.unwrap_or(dir),
             client: None,
             pid: hello.ppid,
             cwd: hello.cwd.clone(),
-            task: None,
+            task: saved.task,
             connected_at: unix_now(),
-            task_updated_at: None,
-            inbox: VecDeque::new(),
+            task_updated_at: saved.task_updated_at,
+            areas: saved.areas.clone(),
+            inbox: saved.inbox.into(),
             notify: Arc::new(Notify::new()),
         };
-        self.inner.lock().unwrap().agents.insert(hello.pid, agent);
-        hello.pid
+        if !agent.inbox.is_empty() {
+            agent.notify.notify_one();
+        }
+        inner.agents.insert(hello.pid, agent);
+        (hello.pid, saved.areas)
     }
 
     /// Record the MCP client from the `initialize` handshake.
@@ -111,8 +180,51 @@ impl Agents {
         }
     }
 
+    /// Forget a session that ended. Its saved state goes too, unless the
+    /// daemon is exiting (the shim will resume it with the next daemon).
     pub fn unregister(&self, id: u32) {
-        self.inner.lock().unwrap().agents.remove(&id);
+        let removed = self.inner.lock().unwrap().agents.remove(&id);
+        if let Some(agent) = removed
+            && !self.shutting_down.load(Ordering::SeqCst)
+            && let (Some(dir), Some(key)) = (&self.dir, &agent.key)
+        {
+            let _ = fs::remove_file(dir.join(format!("{key}.json")));
+        }
+    }
+
+    /// The daemon is exiting: keep the state of sessions ending from now on.
+    pub fn shutting_down(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+    }
+
+    /// Delete saved state of shims that no longer exist.
+    pub fn prune(&self) {
+        let Some(entries) = self.dir.as_ref().and_then(|d| fs::read_dir(d).ok()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(key) = name.strip_suffix(".json") else {
+                continue;
+            };
+            let live = key
+                .split_once('-')
+                .and_then(|(pid, _)| pid.parse().ok())
+                .and_then(process_key)
+                .is_some_and(|k| k == key);
+            if !live {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    /// Remember the session's enabled tool areas.
+    pub fn set_areas(&self, id: u32, areas: Vec<String>) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(agent) = inner.agents.get_mut(&id) {
+            agent.areas = Some(areas);
+            self.save(agent);
+        }
     }
 
     /// Set what agent `id` is working on, and optionally its name.
@@ -136,6 +248,7 @@ impl Agents {
             agent.name = name.trim().to_string();
             agent.named = true;
         }
+        self.save(agent);
         Ok(agent.describe(id))
     }
 
@@ -227,6 +340,7 @@ impl Agents {
             agent.inbox.push_back(message.clone());
             // Stores a permit if nobody waits yet, so the next wait returns.
             agent.notify.notify_one();
+            self.save(agent);
         }
         Ok(recipients)
     }
@@ -238,8 +352,52 @@ impl Agents {
             .agents
             .get_mut(&id)
             .ok_or_else(|| anyhow!("not registered"))?;
-        Ok((agent.inbox.drain(..).collect(), agent.notify.clone()))
+        let messages: Vec<Value> = agent.inbox.drain(..).collect();
+        if !messages.is_empty() {
+            self.save(agent);
+        }
+        Ok((messages, agent.notify.clone()))
     }
+
+    fn load(&self, key: &str) -> Option<Saved> {
+        let path = self.dir.as_ref()?.join(format!("{key}.json"));
+        serde_json::from_slice(&fs::read(path).ok()?).ok()
+    }
+
+    /// Save `agent`'s state (0600, atomically). Best effort: a failure only
+    /// means a reset after the next daemon restart.
+    fn save(&self, agent: &Agent) {
+        let (Some(dir), Some(key)) = (&self.dir, &agent.key) else {
+            return;
+        };
+        let write = || -> std::io::Result<()> {
+            fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(dir)?;
+            let tmp = dir.join(format!(".{key}.tmp"));
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            file.write_all(&serde_json::to_vec(&agent.saved())?)?;
+            fs::rename(&tmp, dir.join(format!("{key}.json")))
+        };
+        if let Err(e) = write() {
+            tracing::warn!(agent = agent.id, error = %e, "saving session state failed");
+        }
+    }
+}
+
+/// `<pid>-<start time>` of a live process: its start time (in clock ticks
+/// since boot, from `/proc/<pid>/stat`) tells a reused pid apart.
+fn process_key(pid: u32) -> Option<String> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after the parenthesized command name; start time is field 22.
+    let start = stat.rsplit_once(") ")?.1.split_whitespace().nth(19)?;
+    Some(format!("{pid}-{start}"))
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -264,8 +422,8 @@ mod tests {
     #[test]
     fn register_describe_and_address() {
         let agents = Agents::default();
-        let a = agents.register(&hello(10, "/src/carl"));
-        let b = agents.register(&hello(20, "/src/web"));
+        let (a, _) = agents.register(&hello(10, "/src/carl"));
+        let (b, _) = agents.register(&hello(20, "/src/web"));
         agents.set_client(a, "claude-code", "2.1");
         assert_eq!(agents.whoami(a).unwrap()["name"], "claude-code@carl");
 
@@ -301,10 +459,10 @@ mod tests {
     #[test]
     fn broadcast_reaches_everyone_else() {
         let agents = Agents::default();
-        let a = agents.register(&hello(10, "/a"));
+        let (a, _) = agents.register(&hello(10, "/a"));
         assert!(agents.send(a, "all", "anyone?").is_err());
-        let b = agents.register(&hello(20, "/b"));
-        let c = agents.register(&hello(30, "/c"));
+        let (b, _) = agents.register(&hello(20, "/b"));
+        let (c, _) = agents.register(&hello(30, "/c"));
         let mut to = agents.send(a, "all", "heads up").unwrap();
         to.sort();
         assert_eq!(to, [b, c]);
@@ -312,5 +470,51 @@ mod tests {
         assert!(agents.take_inbox(a).unwrap().0.is_empty());
         agents.unregister(b);
         assert_eq!(agents.list(a)["agents"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn session_state_survives_a_daemon_restart() {
+        let dir = std::env::temp_dir().join(format!("carl-sessions-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        // A real live pid, so the key can be computed from /proc.
+        let me = hello(std::process::id(), "/src/carl");
+
+        let old = Agents::new(Some(dir.clone()));
+        let (id, restored) = old.register(&me);
+        assert!(restored.is_none());
+        old.describe(id, "shipping 0.1.3", Some("shipper")).unwrap();
+        old.set_areas(id, vec!["agents".into(), "google.mail".into()]);
+        let (other, _) = old.register(&hello(1, "/elsewhere"));
+        old.send(other, "shipper", "ping me when done").unwrap();
+
+        // The daemon exits for an update: state is kept.
+        old.shutting_down();
+        old.unregister(id);
+
+        let new = Agents::new(Some(dir.clone()));
+        let (id, restored) = new.register(&me);
+        assert_eq!(restored.unwrap(), ["agents", "google.mail"]);
+        new.set_client(id, "claude-code", "2");
+        let whoami = new.whoami(id).unwrap();
+        assert_eq!(whoami["name"], "shipper");
+        assert_eq!(whoami["task"], "shipping 0.1.3");
+        assert_eq!(whoami["unread"], 1);
+
+        // A clean disconnect forgets it.
+        new.unregister(id);
+        let fresh = Agents::new(Some(dir.clone()));
+        assert!(fresh.register(&me).1.is_none());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn process_keys_tell_reused_pids_apart() {
+        let key = process_key(std::process::id()).unwrap();
+        assert!(
+            key.starts_with(&format!("{}-", std::process::id())),
+            "{key}"
+        );
+        assert_eq!(process_key(std::process::id()), Some(key));
+        assert!(process_key(u32::MAX).is_none());
     }
 }

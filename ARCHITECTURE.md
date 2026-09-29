@@ -57,7 +57,9 @@ find and message each other.
 4. **If the daemon goes away** (an update, a crash), it reconnects, starting a
    new daemon if needed, and replays `initialize` + `initialized`, swallowing
    the duplicate reply. Requests that were in flight get a JSON-RPC error
-   telling the agent to retry. The client never sees the session drop.
+   telling the agent to retry. It then sends the client
+   `notifications/tools/list_changed`, since the new daemon may expose other
+   tools. The client never sees the session drop.
 5. Exits when the client closes stdin.
 
 ### Daemon
@@ -107,8 +109,13 @@ whatever MCP client it comes from (Claude Code, Codex, …):
   the user, and a message never authorizes anything.
 - The session's `Carl` knows its agent id (`Carl::for_session`); in
   `carl standalone` there is no registry and the agent tools say so.
-- Registry and inboxes are daemon memory: an update or restart clears task
-  descriptions and unread messages (agents re-register on reconnect).
+- **Resuming:** what a session set up (enabled areas, chosen name, task,
+  unread messages) is saved to `<data dir>/sessions/<pid>-<start>.json`
+  (0600), keyed by the shim's pid and process start time (from
+  `/proc/<pid>/stat`, so a reused pid can't inherit it). When the shim
+  reconnects to a new daemon, the session is restored. A clean disconnect
+  deletes the file; a daemon exiting (update, crash) leaves it; a starting
+  daemon prunes files of shims that are gone.
 
 ### Tool areas
 

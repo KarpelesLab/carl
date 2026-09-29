@@ -66,6 +66,8 @@ pub fn run(config: Config) -> Result<()> {
         .build()?;
     let handle = runtime.handle().clone();
     let carl = Carl::new(config.clone());
+    // Saved sessions of shims that died while no daemon ran.
+    carl.agents.prune();
     let sessions = Arc::new(Sessions::new());
     let mut listener = Listener::bind(&config, &handle, &carl, &sessions)?;
     tracing::info!(pid = std::process::id(), socket = %config.socket.display(), "daemon listening");
@@ -90,6 +92,7 @@ pub fn run(config: Config) -> Result<()> {
                 Some(new) => lock = new,
                 None => {
                     tracing::warn!("another daemon took over, exiting");
+                    carl.agents.shutting_down();
                     runtime.shutdown_background();
                     return Ok(());
                 }
@@ -109,6 +112,8 @@ pub fn run(config: Config) -> Result<()> {
     if listener.is_current()? {
         let _ = fs::remove_file(&config.socket);
     }
+    // Sessions still open resume with the next daemon: keep their state.
+    carl.agents.shutting_down();
     tracing::info!(reason, "exiting");
     runtime.shutdown_background();
     Ok(())
@@ -253,11 +258,12 @@ fn serve_connection(
         shim_version = hello.version,
         "session opened"
     );
+    let (id, restored) = carl.agents.register(&hello);
     let agent = AgentGuard {
         agents: carl.agents.clone(),
-        id: carl.agents.register(&hello),
+        id,
     };
-    let carl = carl.for_session(agent.id, hello.areas.as_deref());
+    let carl = carl.for_session(id, restored.as_deref(), hello.areas.as_deref());
 
     let (server_io, bridge_io) = tokio::io::duplex(PIPE_SIZE);
     let (bridge_read, bridge_write) = tokio::io::split(bridge_io);

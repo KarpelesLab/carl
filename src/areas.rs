@@ -132,6 +132,12 @@ pub fn initial(env: Option<&str>) -> BTreeSet<&'static str> {
     }
 }
 
+/// Areas saved from an earlier session, if they are all still valid.
+pub fn restore(saved: &[String]) -> Option<BTreeSet<&'static str>> {
+    let ids: Vec<&str> = saved.iter().map(String::as_str).collect();
+    expand(&ids).ok()
+}
+
 /// Whether `tool` is visible with `enabled` areas.
 pub fn visible(tool: &str, enabled: &BTreeSet<&'static str>) -> bool {
     area_of(tool).is_none_or(|area| enabled.contains(area))

@@ -28,6 +28,8 @@ struct Client {
     child: Child,
     stdin: Option<ChildStdin>,
     responses: Receiver<Value>,
+    /// Notifications received while waiting for a response.
+    notifications: std::cell::RefCell<std::collections::VecDeque<Value>>,
 }
 
 impl Client {
@@ -70,6 +72,7 @@ impl Client {
             stdin: child.stdin.take(),
             child,
             responses,
+            notifications: Default::default(),
         };
         client.send(json!({
             "jsonrpc": "2.0", "id": 0, "method": "initialize",
@@ -88,8 +91,31 @@ impl Client {
         stdin.flush().unwrap();
     }
 
+    /// The next response; notifications arriving first are set aside.
     fn recv(&self) -> Value {
-        self.responses.recv_timeout(TIMEOUT).expect("no response")
+        loop {
+            let msg = self.responses.recv_timeout(TIMEOUT).expect("no response");
+            if msg.get("id").is_some() {
+                return msg;
+            }
+            self.notifications.borrow_mut().push_back(msg);
+        }
+    }
+
+    /// The next notification (set aside earlier, or still to come).
+    fn notification(&self) -> Value {
+        if let Some(msg) = self.notifications.borrow_mut().pop_front() {
+            return msg;
+        }
+        let msg = self
+            .responses
+            .recv_timeout(TIMEOUT)
+            .expect("no notification");
+        assert!(
+            msg.get("id").is_none(),
+            "expected a notification, got {msg}"
+        );
+        msg
     }
 
     /// Call `tool`; returns (is_error, text parsed as JSON or as a string).
@@ -426,13 +452,11 @@ fn areas_are_enabled_per_session_on_demand() {
     // Enabling google.mail notifies the client, then its tools are listed.
     a.send(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                   "params": {"name": "carl_enable", "arguments": {"areas": ["google.mail"]}}}));
-    let (first, second) = (a.recv(), a.recv());
-    let (notification, response) = if first.get("id").is_some() {
-        (second, first)
-    } else {
-        (first, second)
-    };
-    assert_eq!(notification["method"], "notifications/tools/list_changed");
+    let response = a.recv();
+    assert_eq!(
+        a.notification()["method"],
+        "notifications/tools/list_changed"
+    );
     let (_, result) = a.parse(response);
     assert!(
         result["added_tools"]
@@ -457,7 +481,7 @@ fn areas_are_enabled_per_session_on_demand() {
     assert!(err);
     a.send(json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call",
                   "params": {"name": "carl_disable", "arguments": {"areas": ["google.mail"]}}}));
-    let _ = (a.recv(), a.recv()); // response + notification
+    let _ = (a.recv(), a.notification());
     let tools = a.tool_names(7);
     assert!(!tools.iter().any(|t| t.starts_with("google_")), "{tools:?}");
 }
@@ -479,4 +503,42 @@ fn carl_areas_presets_a_session() {
         !tools.contains(&"agent_list".to_string()),
         "CARL_AREAS replaces the defaults"
     );
+}
+
+#[test]
+fn sessions_resume_after_the_daemon_dies() {
+    let data = data_dir("resume");
+    let mut client = Client::start(&data);
+    let (err, _) = client.call(
+        1,
+        "agent_describe",
+        json!({"task": "long job", "name": "survivor"}),
+    );
+    assert!(!err);
+    client.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                       "params": {"name": "carl_enable", "arguments": {"areas": ["google.drive"]}}}));
+    let _ = (client.recv(), client.notification());
+
+    let old = daemon_pid(&data);
+    let pid = rustix::process::Pid::from_raw(old as i32).unwrap();
+    rustix::process::kill_process(pid, rustix::process::Signal::KILL).unwrap();
+    wait_until("the old daemon is gone", || !alive(old));
+
+    // After reconnecting, the shim tells the client to refetch its tools.
+    let notification = client.notification();
+    assert_eq!(
+        notification["method"], "notifications/tools/list_changed",
+        "{notification}"
+    );
+
+    // The new daemon restored the session: areas, name and task.
+    let tools = client.tool_names(3);
+    assert!(
+        tools.contains(&"google_drive_read".to_string()),
+        "{tools:?}"
+    );
+    let (_, me) = client.call(4, "agent_whoami", json!({}));
+    assert_eq!(me["name"], "survivor");
+    assert_eq!(me["task"], "long job");
+    assert_ne!(daemon_pid(&data), old);
 }

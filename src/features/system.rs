@@ -73,6 +73,10 @@ impl Carl {
             let changed: Vec<&str> = before.symmetric_difference(&enabled).copied().collect();
             (changed, enabled.clone())
         };
+        if let Some(id) = self.session {
+            self.agents
+                .set_areas(id, enabled.iter().map(|a| a.to_string()).collect());
+        }
         if !changed.is_empty() {
             // Clients refetch tools/list on this. Best effort: a client that
             // doesn't support it simply keeps its old list.
