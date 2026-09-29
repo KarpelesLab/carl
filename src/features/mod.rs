@@ -5,5 +5,6 @@
 //! add a new feature.
 
 pub mod email;
+pub mod google;
 pub mod system;
 pub mod wallet;

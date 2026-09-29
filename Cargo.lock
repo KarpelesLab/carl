@@ -97,8 +97,10 @@ name = "carl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "purecrypto",
  "rmcp",
  "rsupd",
+ "rsurl",
  "rustix",
  "schemars",
  "serde",

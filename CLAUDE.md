@@ -67,6 +67,9 @@ the codebase (see `docs/wallet.md`).
 ## Current state
 
 - `system` — implemented (`carl_status`, `carl_ping`).
+- `google` — implemented: account linking, Gmail/Calendar/Drive/Contacts
+  read, and writes that only affect the user. See `docs/google.md`. HTTP goes
+  through rsurl; crypto helpers come from purecrypto (no extra crates).
 - `wallet`, `email` — scaffolded; tool surfaces exist, handlers return
   not-implemented. Design notes in `docs/`.
 

@@ -35,9 +35,31 @@ material), Carl is the trust boundary between the agent and the real world.
 | `system` | `carl_status`, `carl_ping`                              | ✅ available |
 | `wallet` | `wallet_balance`, `wallet_address`, `wallet_send`       | 🚧 scaffold |
 | `email`  | `email_create`, `email_list`, `email_send`              | 🚧 scaffold |
+| `google` | `google_link`, `google_mail_*`, `google_calendar_*`, `google_drive_*`, `google_contacts_search` | ✅ available |
 
 Call **`carl_status`** first — it reports the version and which feature areas are
 live.
+
+### Google
+
+Carl can use your Google account: search and read Gmail, Calendar, Drive
+(Docs, Sheets, Slides) and Contacts, and write things only you see (email
+drafts, events without guests, private files). Sending mail, inviting and
+sharing wait for approvals support. See [`docs/google.md`](docs/google.md).
+
+For now you bring your own OAuth client, once:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a
+   project and enable the **Gmail**, **Google Calendar**, **Google Drive** and
+   **People** APIs.
+2. Configure the OAuth consent screen (External is fine) and publish it
+   (**In production**), so tokens don't expire every 7 days. You'll see an
+   "unverified app" warning once when linking; that is expected for a
+   personal client.
+3. Credentials → Create credentials → OAuth client ID → **Desktop app**, and
+   download its JSON.
+4. Ask your agent to link Google. It passes the JSON to `google_set_client`,
+   then gives you a link from `google_link` to approve in your browser.
 
 ## Build & run
 

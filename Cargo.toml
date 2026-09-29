@@ -23,6 +23,8 @@ anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+rsurl = { version = "0.1.15", default-features = false, features = ["purecrypto-tls"] }
+purecrypto = { version = "0.9.6", default-features = false, features = ["std", "hash", "rng", "jose"] }
 
 [features]
 # Self-update the daemon from signed releases. Enabled only for official (CI)

@@ -12,6 +12,7 @@ mod config;
 mod daemon;
 mod error;
 mod features;
+mod google;
 mod ipc;
 mod server;
 mod shim;

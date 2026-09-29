@@ -144,11 +144,20 @@ src/
 ├── config.rs            Config struct, resolved from the environment.
 ├── error.rs             Small McpError constructors (e.g. not_implemented).
 ├── server.rs            `Carl` ServerHandler; composes feature tool routers.
+├── update.rs            rsupd self-update (daemon, official builds).
+├── google/              Google plumbing: OAuth linking, token store, REST.
+│   ├── mod.rs           `Google`: accounts, token refresh, loopback link flow.
+│   ├── oauth.rs         Scopes per area, PKCE, token endpoint calls.
+│   ├── store.rs         client.json / accounts.json under the data dir.
+│   ├── mail.rs          Gmail MIME → text; RFC 5322 drafts.
+│   └── encoding.rs      URL/base64/time helpers (purecrypto underneath).
 └── features/
     ├── mod.rs           Declares the feature modules.
     ├── system.rs        Introspection tools (status, ping). Always available.
     ├── wallet.rs        Crypto wallet (scaffold).
-    └── email.rs         Email management (scaffold).
+    ├── email.rs         Email management (scaffold).
+    └── google/          google_* tools, one router per area (mail, calendar,
+                         drive, contacts; account tools in mod.rs).
 ```
 
 ## How features compose
@@ -204,6 +213,8 @@ section there as it matures.
 - **rmcp** — MCP server, macros, and the stdio transport (`transport-io`).
 - **tokio / tokio-util** — async runtime; `SyncIoBridge` for the socket bridge.
 - **rsupd** (optional, `auto-update` feature) — signed self-update.
+- **rsurl / purecrypto** — pure-Rust HTTP(S) client and crypto (SHA-256,
+  randomness, base64url) for the Google feature; rsupd uses them too.
 - **rustix** — typed syscalls (`setsid`, `getuid`, `SO_PEERCRED`) with no libc,
   so the same code builds for fullrust.
 - **serde / serde_json / schemars** — tool argument (de)serialization and JSON

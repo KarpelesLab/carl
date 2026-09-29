@@ -24,6 +24,7 @@ impl Carl {
                 "system": "available",
                 "wallet": "scaffolded",
                 "email": "scaffolded",
+                "google": "available",
             },
         });
         Ok(CallToolResult::success(vec![Content::text(
