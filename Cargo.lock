@@ -94,7 +94,7 @@ checksum = "883da6debf9bb96b0d591bb1589ad98b7428bd142f8acf4a014a8034fcab743d"
 
 [[package]]
 name = "carl"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "purecrypto",
