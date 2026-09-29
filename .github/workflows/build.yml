@@ -99,3 +99,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RSUPD_IDENTITY: ${{ secrets.RSUPD_IDENTITY }}
         run: rsupd publish --ci --run ${{ github.run_id }} --channel master --yes
+
+  # Attach the same binary to a GitHub Release, for first installs
+  # (install.sh downloads it from releases/latest). Later updates come
+  # through rsupd.
+  release:
+    name: release
+    needs: [test, fullrust]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: x86_64-unknown-linux-fullrust
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          mv carl carl-linux-x86_64
+          chmod +x carl-linux-x86_64
+          sha256sum carl-linux-x86_64 > carl-linux-x86_64.sha256
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "Carl $GITHUB_REF_NAME" --generate-notes \
+            carl-linux-x86_64 carl-linux-x86_64.sha256

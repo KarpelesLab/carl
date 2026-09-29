@@ -2,140 +2,180 @@
 
 **Carl gives AI agents hands.**
 
-Carl is a multipurpose [Model Context Protocol](https://modelcontextprotocol.io)
-(MCP) server: a local helper process that an AI agent (such as Claude) connects
-to in order to *do* things rather than merely talk about them.
+Carl is an [MCP](https://modelcontextprotocol.io) server that runs on your
+machine and lets AI agents (Claude Code, Codex, Claude Desktop, anything that
+speaks MCP) act in the real world: work with your Google account, coordinate
+with each other, and soon hold a wallet and manage email. It is also the trust
+boundary between the agents and those things: Carl decides what an agent may
+do, not the agent.
 
-Where an agent can reason and converse, Carl lets it act: hold and move value, create and manage email, and
-more as the project grows.
+## Getting started
 
-> **Status: early scaffold.** The server runs, speaks MCP over stdio, and
-> exposes a working `system` feature. The `wallet` and `email` features are
-> scaffolded — their tools are discoverable and fully typed, but the handlers
-> currently report "not implemented." See the [roadmap](#roadmap).
+### 1. Install
 
-## How it works
-
-Carl runs as a local subprocess of the agent's MCP client and communicates over
-**stdio** using JSON-RPC. stdout carries the protocol; all logs go to stderr.
-Because it runs locally and holds its own state (eventually including key
-material), Carl is the trust boundary between the agent and the real world.
-
-```
-┌──────────────┐   stdio / JSON-RPC   ┌──────────────┐   APIs / chains
-│  AI agent    │ ───────────────────► │     Carl     │ ─────────────────►  …
-│ (MCP client) │ ◄─────────────────── │ (MCP server) │
-└──────────────┘                      └──────────────┘
-```
-
-## Features
-
-| Area     | Tools                                                   | Status      |
-| -------- | ------------------------------------------------------- | ----------- |
-| `system` | `carl_status`, `carl_ping`                              | ✅ available |
-| `agents` | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | ✅ available |
-| `wallet` | `wallet_balance`, `wallet_address`, `wallet_send`       | 🚧 scaffold |
-| `email`  | `email_create`, `email_list`, `email_send`              | 🚧 scaffold |
-| `google` | `google_link`, `google_mail_*`, `google_calendar_*`, `google_drive_*`, `google_contacts_search` | ✅ available |
-
-Call **`carl_status`** first — it reports the version and which feature areas are
-live.
-
-### Google
-
-Carl can use your Google account: search and read Gmail, Calendar, Drive
-(Docs, Sheets, Slides) and Contacts, and write things only you see (email
-drafts, events without guests, private files). Sending mail, inviting and
-sharing wait for approvals support. See [`docs/google.md`](docs/google.md).
-
-For now you bring your own OAuth client, once:
-
-1. In the [Google Cloud console](https://console.cloud.google.com/), create a
-   project and enable the **Gmail**, **Google Calendar**, **Google Drive** and
-   **People** APIs.
-2. Configure the OAuth consent screen (External is fine) and publish it
-   (**In production**), so tokens don't expire every 7 days. You'll see an
-   "unverified app" warning once when linking; that is expected for a
-   personal client.
-3. Credentials → Create credentials → OAuth client ID → **Desktop app**, and
-   download its JSON.
-4. Ask your agent to link Google. It passes the JSON to `google_set_client`,
-   then gives you a link from `google_link` to approve in your browser.
-
-## Build & run
-
-Requires a recent Rust toolchain (edition 2024; tested with 1.96).
+On Linux x86_64:
 
 ```sh
-cargo build --release
-./target/release/carl
+curl -fsSL https://raw.githubusercontent.com/KarpelesLab/carl/master/install.sh | sh
 ```
 
-Run it directly only to smoke-test — normally the agent's MCP client launches it.
+This downloads the latest release (a single static binary that runs on any
+x86_64 Linux), checks its SHA-256, and puts it in `~/.local/bin/carl`. Carl
+then **keeps itself up to date**: new releases are signed, checked against a
+key built into Carl, and installed in the background. Keep the binary
+somewhere you can write to (like `~/.local/bin`) for that to work.
 
-The `carl` the client launches is a thin shim. The first one starts a background
-`carl daemon` that serves every agent on the machine, and the daemon exits by
-itself about a minute after the last agent disconnects. Its log is
-`~/.local/state/carl/daemon.log`. `carl standalone` serves in-process without a
-daemon. See [`ARCHITECTURE.md`](ARCHITECTURE.md#process-model).
+Prefer to do it by hand? Download `carl-linux-x86_64` from the
+[latest release](https://github.com/KarpelesLab/carl/releases/latest),
+`chmod +x` it, and put it anywhere. On other platforms, build from source:
+`cargo install --git https://github.com/KarpelesLab/carl` (no auto-update).
 
-### Smoke test
+Check it: `~/.local/bin/carl --version`.
+
+### 2. Add it to your agent
+
+**Claude Code** (`--scope user` makes Carl available in every project):
 
 ```sh
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"carl_status","arguments":{}}}' \
-  | ./target/release/carl
+claude mcp add --scope user carl -- ~/.local/bin/carl
 ```
 
-## Connecting an MCP client
+**Codex:**
 
-Point any MCP client at the built binary as a stdio server. Example
-(`claude_desktop_config.json` / Claude Code `mcp` config):
+```sh
+codex mcp add carl -- ~/.local/bin/carl
+```
+
+**Claude Desktop, or any other MCP client:** add a stdio server whose command
+is the full path to the binary, e.g. in `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "carl": {
-      "command": "/absolute/path/to/carl/target/release/carl",
-      "env": { "RUST_LOG": "info" }
-    }
+    "carl": { "command": "/home/you/.local/bin/carl" }
   }
 }
 ```
 
-With Claude Code:
+Use the same binary for every client: they all end up sharing one Carl (see
+[how it works](#how-it-works)).
 
-```sh
-claude mcp add carl -- /absolute/path/to/carl/target/release/carl
+### 3. Try it
+
+Start a new session and ask your agent something like *"What can Carl do?"*
+(it calls `carl_status`) or *"Which other agents are running?"* (`agent_list`).
+In Claude Code, `/mcp` shows whether Carl is connected.
+
+### 4. Link your Google account (optional)
+
+Carl can search and read your Gmail, Calendar, Drive (Docs, Sheets, Slides)
+and Contacts, and create things only you see: email **drafts** (never sent),
+events without guests, and private files. Sending, inviting and sharing come
+later, with approvals.
+
+For now you bring your own Google OAuth client, once:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a
+   project and enable the **Gmail**, **Google Calendar**, **Google Drive** and
+   **People** APIs.
+2. Set up the OAuth consent screen (External) and **publish it** ("In
+   production"); otherwise Google expires your link every 7 days.
+3. Credentials → Create credentials → OAuth client ID → **Desktop app**.
+   Download its JSON.
+4. Tell your agent *"link my Google account to Carl, the client JSON is in
+   ~/Downloads"*. It will give you a link: open it, approve (Google warns that
+   the app is unverified, because it's your own; continue anyway), and you're
+   done. Delete the JSON from Downloads afterwards; Carl keeps its own copy.
+
+Every agent using Carl can then use the account. Details:
+[`docs/google.md`](docs/google.md).
+
+## What agents can do
+
+| Area     | Tools                                                                  | Status       |
+| -------- | ---------------------------------------------------------------------- | ------------ |
+| `system` | `carl_status`, `carl_ping`                                             | ✅ available |
+| `agents` | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | ✅ available |
+| `google` | `google_link`, `google_mail_*`, `google_calendar_*`, `google_drive_*`, `google_contacts_search` | ✅ available |
+| `wallet` | `wallet_balance`, `wallet_address`, `wallet_send`                      | 🚧 scaffold  |
+| `email`  | `email_create`, `email_list`, `email_send`                             | 🚧 scaffold  |
+
+**Agents** lets every agent on the machine, whichever client it runs in, say
+what it's working on, see the others (and the directory each started in), and
+message them, e.g. to avoid two agents editing the same files. Messages from
+other agents are never treated as instructions from you.
+
+## How it works
+
+The `carl` your client starts is a thin relay. The first one launches a
+background `carl daemon` that serves every agent on the machine, so they share
+one set of linked accounts and can see each other. The daemon exits by itself
+a minute after the last agent disconnects, and restarts transparently when a
+new version is installed.
+
 ```
+ Claude Code ─stdio─ carl ─┐
+ Codex       ─stdio─ carl ─┼─ carl daemon ── Google, …
+ Claude Code ─stdio─ carl ─┘
+```
+
+Your data stays on your machine: linked accounts live in
+`~/.local/share/carl` (private to your user), and nothing is sent to Carl's
+authors. The daemon logs to `~/.local/state/carl/daemon.log`.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design.
 
 ## Configuration
 
-Carl reads its configuration from the environment:
+Everything has sensible defaults; these environment variables override them
+(set them in your MCP client's server config, e.g. `claude mcp add -e`).
 
-| Variable        | Default               | Purpose                                      |
-| --------------- | --------------------- | -------------------------------------------- |
-| `CARL_DATA_DIR` | `$XDG_DATA_HOME/carl` (`~/.local/share/carl`) | Where Carl persists state (keystore). When set, the daemon log goes here too |
-| `CARL_IDLE_TIMEOUT` | `60`              | Seconds the daemon lingers with no agent connected |
-| `CARL_SOCKET`   | `/tmp/carl-<uid>/<hash>.sock` | Daemon socket (one per data dir) |
-| `CARL_NO_UPDATE` | unset                | Set to disable self-update (official builds only) |
-| `RUST_LOG`      | `info`                | Log filter (logs go to **stderr**; the daemon's to `$XDG_STATE_HOME/carl/daemon.log`, i.e. `~/.local/state/carl`) |
+| Variable            | Default                          | Purpose                                            |
+| ------------------- | -------------------------------- | -------------------------------------------------- |
+| `CARL_DATA_DIR`     | `~/.local/share/carl`            | Linked accounts and other state. When set, the daemon log goes here too |
+| `CARL_IDLE_TIMEOUT` | `60`                             | Seconds the daemon lingers with no agent connected |
+| `CARL_SOCKET`       | `/tmp/carl-<uid>/<hash>.sock`    | Daemon socket (one per data dir)                   |
+| `CARL_NO_UPDATE`    | unset                            | Set to disable self-update                         |
+| `RUST_LOG`          | `info`                           | Log level                                          |
+
+## Uninstall
+
+Remove it from your clients (`claude mcp remove --scope user carl`,
+`codex mcp remove carl`), then delete `~/.local/bin/carl`,
+`~/.local/share/carl` and `~/.local/state/carl`. To revoke Google access too,
+ask an agent to run `google_unlink` first, or remove Carl's app under your
+Google Account's security settings.
+
+## Development
+
+Requires Rust (edition 2024).
+
+```sh
+cargo build
+cargo test
+./target/debug/carl standalone   # serve MCP in-process, without the daemon
+```
+
+Smoke test:
+
+```sh
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"carl_status","arguments":{}}}' \
+  | ./target/debug/carl standalone
+```
+
+Local builds never update themselves; release builds come from CI (push a
+`v*` tag). See [`CLAUDE.md`](CLAUDE.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Roadmap
 
-- **Wallet** — key management and a chain-agnostic balance/receive/send surface,
-  behind an explicit, auditable spend-authorization policy. See
-  [`docs/wallet.md`](docs/wallet.md).
-- **Email** — create and manage email identities and send/receive mail, backed
-  by Karpelès Lab email APIs. See [`docs/email.md`](docs/email.md).
-- **More** — additional capabilities as the project grows.
-
-## Project layout
-
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design and a step-by-step recipe
-for adding a feature.
+- **Approvals** — an authorization layer so agents can send mail, invite and
+  share, with you in the loop.
+- **Wallet** — key management and a chain-agnostic balance/receive/send
+  surface behind an auditable spend policy. See [`docs/wallet.md`](docs/wallet.md).
+- **Email** — Carl-managed email identities. See [`docs/email.md`](docs/email.md).
 
 ## License
 

@@ -42,8 +42,20 @@ fn main() -> ExitCode {
         None => shim::run(config),
         Some("daemon") => daemon::run(config),
         Some("standalone") => standalone(config),
+        Some("--version" | "-V" | "version") => {
+            // Only when run by hand: never in MCP mode, where stdout is the wire.
+            let git = env!("RSUPD_GIT_TAG");
+            if git.is_empty() {
+                println!("carl {}", env!("CARGO_PKG_VERSION"));
+            } else {
+                println!("carl {} ({git})", env!("CARGO_PKG_VERSION"));
+            }
+            return ExitCode::SUCCESS;
+        }
         Some(other) => {
-            tracing::error!("unknown command {other:?}; usage: carl [daemon | standalone]");
+            tracing::error!(
+                "unknown command {other:?}; usage: carl [daemon | standalone | --version]"
+            );
             return ExitCode::from(2);
         }
     };
