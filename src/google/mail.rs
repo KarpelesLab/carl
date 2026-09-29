@@ -193,7 +193,8 @@ pub fn build_message(draft: &Draft) -> Result<Vec<u8>> {
     let mut headers = vec![("Subject", encode_word(draft.subject))];
     for (name, list) in [("To", draft.to), ("Cc", draft.cc), ("Bcc", draft.bcc)] {
         if !list.is_empty() {
-            headers.push((name, list.join(", ")));
+            let encoded: Vec<String> = list.iter().map(|a| encode_address(a)).collect();
+            headers.push((name, encoded.join(", ")));
         }
     }
     headers.push(("MIME-Version", "1.0".to_string()));
@@ -306,11 +307,46 @@ pub fn mime_for(filename: &str) -> &'static str {
 }
 
 /// `s` as an RFC 2047 encoded-word if it isn't plain ASCII.
+/// Split into chunks of at most 45 bytes (60 base64 characters, keeping
+/// each word within RFC 2047's 75-character limit), never inside a
+/// character; decoders join adjacent encoded-words.
 fn encode_word(s: &str) -> String {
     if s.bytes().all(|b| (0x20..0x7f).contains(&b)) {
-        s.to_string()
-    } else {
-        format!("=?UTF-8?B?{}?=", b64_std_encode(s.as_bytes()))
+        return s.to_string();
+    }
+    let mut words = Vec::new();
+    let mut chunk = String::new();
+    for c in s.chars() {
+        if chunk.len() + c.len_utf8() > 45 {
+            words.push(format!("=?UTF-8?B?{}?=", b64_std_encode(chunk.as_bytes())));
+            chunk.clear();
+        }
+        chunk.push(c);
+    }
+    if !chunk.is_empty() {
+        words.push(format!("=?UTF-8?B?{}?=", b64_std_encode(chunk.as_bytes())));
+    }
+    words.join(" ")
+}
+
+/// An address for To/Cc/Bcc: a non-ASCII display name (`Mark Karpelès
+/// <mark@x>`) becomes an encoded-word, as raw UTF-8 in headers gets
+/// garbled by mail systems.
+fn encode_address(addr: &str) -> String {
+    let addr = addr.trim();
+    match addr.rfind('<') {
+        Some(i) if addr.ends_with('>') => {
+            let name = addr[..i].trim().trim_matches('"').trim();
+            let email = &addr[i..];
+            if name.is_empty() {
+                email.to_string()
+            } else if name.is_ascii() {
+                addr.to_string()
+            } else {
+                format!("{} {email}", encode_word(name))
+            }
+        }
+        _ => addr.to_string(),
     }
 }
 
@@ -464,5 +500,37 @@ mod tests {
         assert_eq!(reply_subject("RE: hello"), "RE: hello");
         assert_eq!(truncate("héllo", 2), ("hé".to_string(), true));
         assert_eq!(truncate("hé", 5), ("hé".to_string(), false));
+    }
+
+    #[test]
+    fn non_ascii_headers_are_encoded() {
+        assert_eq!(
+            encode_address("Mark Karpelès <mark@klb.jp>"),
+            format!(
+                "=?UTF-8?B?{}?= <mark@klb.jp>",
+                b64_std_encode("Mark Karpelès".as_bytes())
+            )
+        );
+        assert_eq!(
+            encode_address("\"Mark Karpelès\" <mark@klb.jp>"),
+            encode_address("Mark Karpelès <mark@klb.jp>")
+        );
+        assert_eq!(encode_address("Bob <bob@x.com>"), "Bob <bob@x.com>");
+        assert_eq!(encode_address("bob@x.com"), "bob@x.com");
+        // Long subjects become several words, each within the limit, never
+        // splitting a character.
+        let long = "日本語の件名".repeat(10);
+        let encoded = encode_word(&long);
+        let words: Vec<&str> = encoded.split(' ').collect();
+        assert!(words.len() > 1);
+        assert!(words.iter().all(|w| w.len() <= 75), "{encoded}");
+        let decoded: String = words
+            .iter()
+            .map(|w| {
+                let b64 = w.trim_start_matches("=?UTF-8?B?").trim_end_matches("?=");
+                String::from_utf8(crate::google::encoding::b64_std_decode(b64).unwrap()).unwrap()
+            })
+            .collect();
+        assert_eq!(decoded, long);
     }
 }
