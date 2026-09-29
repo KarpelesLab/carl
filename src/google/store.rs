@@ -25,10 +25,45 @@ pub struct Client {
     pub client_secret: String,
 }
 
+/// Whose account it is, which decides what Carl may do with it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Owner {
+    /// The user's own account: Carl acts on their behalf, so anything done
+    /// with it speaks for them. The default, and the stricter case.
+    #[default]
+    User,
+    /// An account dedicated to Carl (e.g. its own mailbox): acting with it
+    /// speaks for Carl, not the user.
+    Carl,
+}
+
+impl Owner {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "user" => Some(Owner::User),
+            "carl" => Some(Owner::Carl),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Owner::User => "user",
+            Owner::Carl => "carl",
+        }
+    }
+}
+
 /// A linked Google account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub email: String,
+    /// Only ever changed by a human (`carl google owner …`), never through
+    /// MCP: otherwise an agent could relabel the user's account as Carl's to
+    /// get more latitude with it.
+    #[serde(default)]
+    pub owner: Owner,
     pub refresh_token: String,
     /// The client that issued `refresh_token`; only it can refresh it.
     pub client_id: String,
@@ -80,6 +115,8 @@ impl Store {
             .position(|a| a.email.eq_ignore_ascii_case(&account.email))
         {
             let old = accounts.remove(pos);
+            // Linking again never changes whose account it is.
+            account.owner = old.owner;
             // Earlier grants survive only if the same client still holds them.
             if old.client_id == account.client_id {
                 for scope in old.scopes {
@@ -93,6 +130,21 @@ impl Store {
         accounts.push(account);
         accounts.sort_by(|a, b| a.email.cmp(&b.email));
         self.write("accounts.json", &accounts)
+    }
+
+    /// Set whose account `email` is. `false` if it isn't linked.
+    pub fn set_owner(&self, email: &str, owner: Owner) -> Result<bool> {
+        let _guard = self.lock.lock().unwrap();
+        let mut accounts = self.accounts()?;
+        let Some(account) = accounts
+            .iter_mut()
+            .find(|a| a.email.eq_ignore_ascii_case(email))
+        else {
+            return Ok(false);
+        };
+        account.owner = owner;
+        self.write("accounts.json", &accounts)?;
+        Ok(true)
     }
 
     pub fn remove_account(&self, email: &str) -> Result<Option<Account>> {
@@ -150,6 +202,7 @@ mod tests {
         Account {
             email: email.into(),
             refresh_token: "rt".into(),
+            owner: Owner::User,
             client_id: client.into(),
             scopes: scopes.iter().map(|s| s.to_string()).collect(),
             linked_at: 0,
@@ -170,6 +223,17 @@ mod tests {
             .unwrap();
         let a = store.account("a@x.com").unwrap().unwrap();
         assert_eq!(a.scopes, ["drive", "mail"]);
+
+        // Ownership is set explicitly and survives linking again.
+        assert!(store.set_owner("a@x.com", Owner::Carl).unwrap());
+        assert!(!store.set_owner("nobody@x.com", Owner::Carl).unwrap());
+        store
+            .upsert_account(account("a@x.com", "c1", &["mail"]))
+            .unwrap();
+        assert_eq!(
+            store.account("a@x.com").unwrap().unwrap().owner,
+            Owner::Carl
+        );
 
         store
             .upsert_account(account("a@x.com", "c2", &["calendar"]))

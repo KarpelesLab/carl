@@ -8,7 +8,7 @@
 pub mod encoding;
 pub mod mail;
 pub mod oauth;
-mod store;
+pub mod store;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 
 use encoding::{parse_query, random_token, unix_now};
 pub use oauth::Area;
+pub use store::Owner;
 use store::{Account, Client, Store};
 
 /// A shared OAuth client compiled into Carl, used when the user configured
@@ -113,6 +114,7 @@ impl Google {
             .map(|a| {
                 json!({
                     "email": a.email,
+                    "owner": a.owner.as_str(),
                     "areas": oauth::areas_of(&a.scopes),
                     "linked_at": encoding::rfc3339(a.linked_at),
                 })
@@ -179,6 +181,11 @@ impl Google {
             .unwrap_or(redirect_url);
         let query = query.split('#').next().unwrap_or_default();
         self.finish_link(&parse_query(query))
+    }
+
+    /// Set whose account `email` is (human-only: called from the CLI).
+    pub fn set_owner(&self, email: &str, owner: Owner) -> Result<bool> {
+        self.store.set_owner(email, owner)
     }
 
     /// Unlink an account, revoking Carl's access at Google.
@@ -439,6 +446,8 @@ impl Google {
         )?;
         self.store.upsert_account(Account {
             email: email.clone(),
+            // New accounts are the user's until a human says otherwise.
+            owner: Owner::User,
             refresh_token,
             client_id: pending.client.client_id,
             scopes: tokens
@@ -581,6 +590,7 @@ mod tests {
                 .store
                 .upsert_account(Account {
                     email: email.into(),
+                    owner: Owner::User,
                     refresh_token: "rt".into(),
                     client_id: "123.apps.googleusercontent.com".into(),
                     scopes: vec![Area::Mail.scope().into()],

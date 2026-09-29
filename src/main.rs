@@ -43,6 +43,7 @@ fn main() -> ExitCode {
         None => shim::run(config),
         Some("daemon") => daemon::run(config),
         Some("standalone") => standalone(config),
+        Some("google") => google_cli(&config, &std::env::args().skip(2).collect::<Vec<_>>()),
         Some("--version" | "-V" | "version") => {
             // Only when run by hand: never in MCP mode, where stdout is the wire.
             let git = env!("RSUPD_GIT_TAG");
@@ -55,7 +56,7 @@ fn main() -> ExitCode {
         }
         Some(other) => {
             tracing::error!(
-                "unknown command {other:?}; usage: carl [daemon | standalone | --version]"
+                "unknown command {other:?}; usage: carl [daemon | standalone | google | --version]"
             );
             return ExitCode::from(2);
         }
@@ -83,6 +84,40 @@ fn rsupd_updater() -> rsupd::Result<rsupd::Updater> {
         // build, not by rsupd re-executing it.
         .auto_restart(false)
         .build()
+}
+
+/// `carl google …`: account settings only a human may change, so they are not
+/// exposed as MCP tools.
+fn google_cli(config: &Config, args: &[String]) -> Result<()> {
+    let google = google::Google::new(&config.data_dir);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    match args.as_slice() {
+        ["accounts"] | [] => {
+            for account in google.accounts()? {
+                println!(
+                    "{}\towner={}\tareas={}",
+                    account["email"].as_str().unwrap_or_default(),
+                    account["owner"].as_str().unwrap_or_default(),
+                    account["areas"]
+                );
+            }
+            Ok(())
+        }
+        ["owner", email, owner] => {
+            let owner = google::Owner::parse(owner)
+                .ok_or_else(|| anyhow::anyhow!("owner must be `user` or `carl`"))?;
+            if !google.set_owner(email, owner)? {
+                anyhow::bail!("{email} is not linked");
+            }
+            println!("{email}: owner={}", owner.as_str());
+            Ok(())
+        }
+        _ => anyhow::bail!(
+            "usage: carl google accounts | carl google owner <email> <user|carl>\n  \
+             owner=user: the user's own account, Carl acts on their behalf (default)\n  \
+             owner=carl: an account dedicated to Carl"
+        ),
+    }
 }
 
 /// Serve MCP over stdio in this process, bypassing the daemon.

@@ -37,6 +37,33 @@ Accounts live in the daemon, so every agent on the machine shares them.
 Each account remembers which client issued its token; only that client can
 refresh it.
 
+## Whose account: `owner`
+
+Each linked account records whose it is:
+
+- `user` (the default): the user's own account. Carl acts **on their behalf**,
+  so anything sent, shared or accepted with it speaks for the user. Paul
+  (the approvals layer) will hold these to the stricter policy.
+- `carl`: an account dedicated to Carl, e.g. its own mailbox
+  (`carl@klb.jp`). Acting with it speaks for Carl, so it can get more
+  latitude, like sending as itself.
+
+Only a human changes it, with the CLI:
+
+```sh
+carl google accounts                      # list accounts and owners
+carl google owner carl@klb.jp carl        # dedicate an account to Carl
+```
+
+There is deliberately no MCP tool for it: otherwise an agent could relabel
+the user's account as Carl's to get more latitude. Linking an account again
+keeps its owner. `google_accounts` shows it to agents.
+
+Caveat: this guards against agents acting **through Carl**. An agent that can
+also run shell commands as the same user could run that CLI or edit Carl's
+files directly. Real isolation needs agents sandboxed from Carl's data dir
+(e.g. Claude Code's sandbox denying writes to `~/.local/share/carl`).
+
 ## Scopes and what Carl does with them
 
 | Area     | Scope                   | Tools today                                      | Waits for approvals (Paul)        |
