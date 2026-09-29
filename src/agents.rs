@@ -257,6 +257,7 @@ mod tests {
             pid,
             ppid: Some(pid - 1),
             cwd: Some(cwd.into()),
+            areas: None,
         }
     }
 

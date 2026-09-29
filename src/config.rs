@@ -44,6 +44,9 @@ pub struct Config {
     /// How long the daemon stays up after its last shim disconnects
     /// (`$CARL_IDLE_TIMEOUT`, in seconds).
     pub idle_timeout: Duration,
+    /// Tool areas new sessions start with (`$CARL_AREAS`: comma-separated
+    /// ids or `all`). In the daemon, each session uses its shim's value.
+    pub areas: Option<String>,
     /// How often the daemon verifies it still owns its lock and socket
     /// (`$CARL_HEALTH_INTERVAL`, in seconds; mostly for tests).
     pub health_interval: Duration,
@@ -70,6 +73,7 @@ impl Config {
             data_dir,
             log_dir,
             socket,
+            areas: std::env::var("CARL_AREAS").ok(),
             idle_timeout: env_secs("CARL_IDLE_TIMEOUT").unwrap_or(DEFAULT_IDLE_TIMEOUT),
             health_interval: env_secs("CARL_HEALTH_INTERVAL").unwrap_or(DEFAULT_HEALTH_INTERVAL),
         }

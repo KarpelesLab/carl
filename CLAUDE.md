@@ -34,6 +34,9 @@ Quick MCP smoke test (handshake + a tool call) is in `README.md`.
 - **Tool naming:** prefix with the feature area — `wallet_*`, `email_*`, `agent_*`,
   `carl_*` for system tools. Set an explicit `#[tool(name = "…", description =
   "…")]`; descriptions are read by the agent, so make them actionable.
+- **Areas:** every non-`carl_*` tool belongs to an area (`src/areas.rs`, by
+  name prefix); sessions only see enabled areas. A new feature needs a prefix
+  in `area_of` and an entry in `AREAS`.
 - **Arguments:** use `Parameters<T>` with `T: Deserialize + schemars::JsonSchema`.
   Field doc-comments become the JSON Schema descriptions the agent sees.
 - **Unimplemented handlers** return `error::not_implemented("<tool>")` — keep the

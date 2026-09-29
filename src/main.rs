@@ -9,6 +9,7 @@
 //! the `RUST_LOG` environment variable, e.g. `RUST_LOG=debug`).
 
 mod agents;
+mod areas;
 mod config;
 mod daemon;
 mod error;

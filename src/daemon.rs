@@ -257,7 +257,7 @@ fn serve_connection(
         agents: carl.agents.clone(),
         id: carl.agents.register(&hello),
     };
-    let carl = carl.for_session(agent.id);
+    let carl = carl.for_session(agent.id, hello.areas.as_deref());
 
     let (server_io, bridge_io) = tokio::io::duplex(PIPE_SIZE);
     let (bridge_read, bridge_write) = tokio::io::split(bridge_io);

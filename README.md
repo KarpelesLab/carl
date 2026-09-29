@@ -60,6 +60,12 @@ is the full path to the binary, e.g. in `claude_desktop_config.json`:
 Use the same binary for every client: they all end up sharing one Carl (see
 [how it works](#how-it-works)).
 
+Carl starts each session with a small set of tools and lets the agent turn on
+more areas as needed (see [tool areas](#tool-areas)). That relies on the client
+refreshing its tool list when told to, which Claude Code does. If your client
+doesn't (new tools never appear after `carl_enable`), preset the areas instead,
+e.g. `codex mcp add carl --env CARL_AREAS=all -- ~/.local/bin/carl`.
+
 ### 3. Try it
 
 Start a new session and ask your agent something like *"What can Carl do?"*
@@ -92,13 +98,26 @@ Every agent using Carl can then use the account. Details:
 
 ## What agents can do
 
-| Area     | Tools                                                                  | Status       |
-| -------- | ---------------------------------------------------------------------- | ------------ |
-| `system` | `carl_status`, `carl_ping`                                             | ✅ available |
-| `agents` | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | ✅ available |
-| `google` | `google_link`, `google_mail_*`, `google_calendar_*`, `google_drive_*`, `google_contacts_search` | ✅ available |
-| `wallet` | `wallet_balance`, `wallet_address`, `wallet_send`                      | 🚧 scaffold  |
-| `email`  | `email_create`, `email_list`, `email_send`                             | 🚧 scaffold  |
+### Tool areas
+
+Carl's tools are grouped into areas, and a session only sees the areas it
+enabled, so agents aren't handed dozens of tools they don't need. The
+`carl_*` tools are always there: `carl_status` lists every area and its tools,
+and `carl_enable` / `carl_disable` turn areas on and off for that session
+only.
+
+| Area              | Tools                                                           | Default |
+| ----------------- | --------------------------------------------------------------- | ------- |
+| `agents`          | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | on |
+| `google.mail`     | `google_mail_search`, `_read`, `_labels`, `_draft`              | off     |
+| `google.calendar` | `google_calendar_list`, `_events`, `_freebusy`, `_create_event` | off     |
+| `google.drive`    | `google_drive_search`, `_read`, `_create`, `_update`            | off     |
+| `google.contacts` | `google_contacts_search`                                        | off     |
+| `google`          | all of the above, plus account tools (`google_link`, …), which come with any `google.*` area | off |
+| `wallet`, `email` | not available yet                                               | —       |
+
+`CARL_AREAS` (comma-separated, or `all`) sets which areas a session starts
+with, per client: `claude mcp add -e CARL_AREAS=agents,google.mail …`.
 
 **Agents** lets every agent on the machine, whichever client it runs in, say
 what it's working on, see the others (and the directory each started in), and
@@ -135,6 +154,7 @@ Everything has sensible defaults; these environment variables override them
 | `CARL_DATA_DIR`     | `~/.local/share/carl`            | Linked accounts and other state. When set, the daemon log goes here too |
 | `CARL_IDLE_TIMEOUT` | `60`                             | Seconds the daemon lingers with no agent connected |
 | `CARL_SOCKET`       | `/tmp/carl-<uid>/<hash>.sock`    | Daemon socket (one per data dir)                   |
+| `CARL_AREAS`        | `agents`                         | Tool areas a session starts with (`all` for every one) |
 | `CARL_NO_UPDATE`    | unset                            | Set to disable self-update                         |
 | `RUST_LOG`          | `info`                           | Log level                                          |
 

@@ -36,6 +36,9 @@ pub struct ClientHello {
     /// The shim's working directory, normally the agent's project.
     #[serde(default)]
     pub cwd: Option<PathBuf>,
+    /// The shim's `CARL_AREAS`: tool areas this session starts with.
+    #[serde(default)]
+    pub areas: Option<String>,
 }
 
 impl ClientHello {
@@ -46,6 +49,7 @@ impl ClientHello {
             pid: std::process::id(),
             ppid: Some(std::os::unix::process::parent_id()),
             cwd: std::env::current_dir().ok(),
+            areas: std::env::var("CARL_AREAS").ok(),
         }
     }
 }

@@ -37,7 +37,15 @@ impl Client {
 
     /// Start a client whose shim runs in `cwd`, as an agent started there.
     fn start_in(data: &Path, cwd: &Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_carl"))
+        Self::spawn(data, cwd, None)
+    }
+
+    fn spawn(data: &Path, cwd: &Path, areas: Option<&str>) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_carl"));
+        if let Some(areas) = areas {
+            command.env("CARL_AREAS", areas);
+        }
+        let mut child = command
             .current_dir(cwd)
             .env("CARL_DATA_DIR", data)
             .env("CARL_IDLE_TIMEOUT", "1")
@@ -98,6 +106,20 @@ impl Client {
         let text = result["content"][0]["text"].as_str().unwrap_or_default();
         let value = serde_json::from_str(text).unwrap_or_else(|_| json!(text));
         (result["isError"] == json!(true), value)
+    }
+
+    /// Names of the tools this session currently exposes.
+    fn tool_names(&mut self, id: u64) -> Vec<String> {
+        self.send(json!({"jsonrpc": "2.0", "id": id, "method": "tools/list"}));
+        let resp = self.recv();
+        let mut names: Vec<String> = resp["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        names.sort();
+        names
     }
 
     fn ping(&mut self, id: u64) -> Value {
@@ -378,4 +400,83 @@ fn agent_tools_need_the_daemon() {
     assert_eq!(resp["result"]["isError"], true, "{resp}");
     drop(stdin);
     let _ = child.wait();
+}
+
+#[test]
+fn areas_are_enabled_per_session_on_demand() {
+    let data = data_dir("areas");
+    let mut a = Client::start(&data);
+    let mut b = Client::start(&data);
+
+    // A fresh session sees the carl_* and agent_* tools only.
+    let tools = a.tool_names(1);
+    assert!(
+        tools
+            .iter()
+            .all(|t| t.starts_with("carl_") || t.starts_with("agent_")),
+        "{tools:?}"
+    );
+    assert!(tools.contains(&"carl_enable".to_string()));
+    let (err, msg) = a.call(2, "google_mail_search", json!({"query": "x"}));
+    assert!(
+        err && msg.as_str().unwrap().contains("carl_enable"),
+        "{msg}"
+    );
+
+    // Enabling google.mail notifies the client, then its tools are listed.
+    a.send(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                  "params": {"name": "carl_enable", "arguments": {"areas": ["google.mail"]}}}));
+    let (first, second) = (a.recv(), a.recv());
+    let (notification, response) = if first.get("id").is_some() {
+        (second, first)
+    } else {
+        (first, second)
+    };
+    assert_eq!(notification["method"], "notifications/tools/list_changed");
+    let (_, result) = a.parse(response);
+    assert!(
+        result["added_tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t == "google_link")
+    );
+    let tools = a.tool_names(4);
+    assert!(tools.contains(&"google_mail_search".to_string()));
+    assert!(
+        tools.contains(&"google_link".to_string()),
+        "account tools come along"
+    );
+    assert!(!tools.contains(&"google_drive_search".to_string()));
+
+    // Other sessions are unaffected.
+    assert!(!b.tool_names(1).contains(&"google_mail_search".to_string()));
+
+    // Scaffolded areas can't be enabled; disabling removes the tools again.
+    let (err, _) = a.call(5, "carl_enable", json!({"areas": ["wallet"]}));
+    assert!(err);
+    a.send(json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+                  "params": {"name": "carl_disable", "arguments": {"areas": ["google.mail"]}}}));
+    let _ = (a.recv(), a.recv()); // response + notification
+    let tools = a.tool_names(7);
+    assert!(!tools.iter().any(|t| t.starts_with("google_")), "{tools:?}");
+}
+
+#[test]
+fn carl_areas_presets_a_session() {
+    let data = data_dir("areas-env");
+    let mut client = Client::spawn(
+        &data,
+        Path::new(env!("CARGO_TARGET_TMPDIR")),
+        Some("google.drive"),
+    );
+    let tools = client.tool_names(1);
+    assert!(
+        tools.contains(&"google_drive_read".to_string()),
+        "{tools:?}"
+    );
+    assert!(
+        !tools.contains(&"agent_list".to_string()),
+        "CARL_AREAS replaces the defaults"
+    );
 }

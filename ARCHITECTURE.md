@@ -110,6 +110,26 @@ whatever MCP client it comes from (Claude Code, Codex, …):
 - Registry and inboxes are daemon memory: an update or restart clears task
   descriptions and unread messages (agents re-register on reconnect).
 
+### Tool areas
+
+Every tool belongs to an area (`areas.rs`, by name prefix): `agents`,
+`google`, `google.mail`, `google.calendar`, `google.drive`,
+`google.contacts`, `wallet`, `email`. `carl_*` tools belong to none and are
+always visible.
+
+- Each session has its own set of enabled areas (`Carl.areas`, created in
+  `Carl::for_session`), starting from the shim's `CARL_AREAS` (sent in the
+  hello) or the default, `agents`.
+- `ServerHandler::{list_tools, call_tool, get_tool}` are written by hand in
+  `server.rs` (instead of by `#[tool_handler]`) to filter by those areas. A
+  hidden tool can't be called either.
+- `carl_enable` / `carl_disable` change the set and send
+  `notifications/tools/list_changed` (advertised in the capabilities), and
+  the client refetches `tools/list`. Claude Code does. For clients that
+  don't, `CARL_AREAS` presets the areas.
+- Scaffolded areas (`available: false`) can't be enabled, so their
+  not-implemented tools stay out of sight.
+
 ### Updates
 
 Releases are static, libc-free x86_64 Linux binaries built with
@@ -169,6 +189,7 @@ src/
 ├── server.rs            `Carl` ServerHandler; composes feature tool routers.
 ├── update.rs            rsupd self-update (daemon, official builds).
 ├── agents.rs            Registry of connected agents and their inboxes.
+├── areas.rs             Tool areas: which tools a session exposes.
 ├── google/              Google plumbing: OAuth linking, token store, REST.
 │   ├── mod.rs           `Google`: accounts, token refresh, loopback link flow.
 │   ├── oauth.rs         Scopes per area, PKCE, token endpoint calls.
@@ -221,7 +242,9 @@ dispatch every `tools/list` and `tools/call`.
 4. Add `+ Self::<name>_router()` to the sum in `Carl::new`.
 5. If the feature needs state, add an `Arc<…>` field to `Carl` and initialize it
    in `Carl::new` (the struct is cloned per request, so state must be shared).
-6. Update `carl_status` in `system.rs` and the table in `README.md`.
+6. Give it an area: add its tool prefix to `area_of` and an entry to `AREAS`
+   in `areas.rs` (a unit test fails for tools in unknown areas), and update
+   the table in `README.md`.
 
 ## State & configuration
 
