@@ -243,6 +243,9 @@ mod tests {
             "google_drive_unshare",
             "google_drive_sheet_read",
             "google_drive_sheet_write",
+            "google_drive_slides_read",
+            "google_drive_slides_create",
+            "google_drive_slides_edit",
             "google_contacts_search",
         ];
         for tool in expected {

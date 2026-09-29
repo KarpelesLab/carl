@@ -101,7 +101,7 @@ impl Carl {
     /// Configure the user's own Google OAuth client.
     #[tool(
         name = "google_set_client",
-        description = "Configure the Google OAuth client Carl links accounts with. Needed once, before google_link, unless Carl ships a built-in client. The user creates it in the Google Cloud console: APIs & Services → Credentials → Create credentials → OAuth client ID → type 'Desktop app', and enables the Gmail, Google Calendar, Google Drive, Google Sheets and People APIs; setting the consent screen to 'In production' avoids tokens expiring weekly. Pass the downloaded JSON file's path (often in ~/Downloads, named client_secret_*.json), or the client ID and secret."
+        description = "Configure the Google OAuth client Carl links accounts with. Needed once, before google_link, unless Carl ships a built-in client. The user creates it in the Google Cloud console: APIs & Services → Credentials → Create credentials → OAuth client ID → type 'Desktop app', and enables the Gmail, Google Calendar, Google Drive, Google Sheets, Google Slides and People APIs; setting the consent screen to 'In production' avoids tokens expiring weekly. Pass the downloaded JSON file's path (often in ~/Downloads, named client_secret_*.json), or the client ID and secret."
     )]
     async fn google_set_client(
         &self,

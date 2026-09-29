@@ -82,11 +82,12 @@ The rule until the approvals layer (Paul) exists:
 | -------- | ------------------- | ----------- | ------------------------ |
 | mail     | `gmail.modify`      | search (paged), read, attachments, labels (archive, read, not spam…), drafts | send, send drafts, trash |
 | calendar | `calendar`          | list, events, free/busy, get; create/update/delete own guest-less events on the primary calendar | guests & invitations, other calendars, RSVP, events others see |
-| drive    | `drive`             | search (paged), read as text, download/export, Sheets ranges read; create/update/move/trash own unshared files, Sheets write on them | share/unshare, changing files others can see |
+| drive    | `drive`             | search (paged), read as text, download/export, Sheets ranges and Slides read; create/update/move/trash own unshared files, Sheets write and Slides create/edit on them | share/unshare, changing files others can see |
 | contacts | `contacts.readonly` | search | — |
 
-Sheets tools use the Sheets API, which must be enabled in the OAuth
-client's Cloud project along with the Gmail, Calendar, Drive and People APIs.
+Sheets and Slides tools use the Sheets and Slides APIs, which must be
+enabled in the OAuth client's Cloud project along with the Gmail, Calendar,
+Drive and People APIs.
 
 The scopes are broader than some tools on purpose: Carl, not the token, is
 what limits the agent, and new tools shouldn't make the user link again.

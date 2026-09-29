@@ -145,7 +145,7 @@ impl Google {
                 "no Google OAuth client configured. Have the user create one \
                  (Google Cloud console → APIs & Services → Credentials → Create \
                  OAuth client ID → Desktop app; enable the Gmail, Calendar, Drive, \
-                 Sheets and People APIs), then pass its JSON file to google_set_client"
+                 Sheets, Slides and People APIs), then pass its JSON file to google_set_client"
             ),
         };
         let listener = TcpListener::bind("127.0.0.1:0").context("opening a loopback port")?;

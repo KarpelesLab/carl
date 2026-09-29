@@ -85,7 +85,7 @@ For now you bring your own Google OAuth client, once:
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a
    project and enable the **Gmail**, **Google Calendar**, **Google Drive**,
-   **Google Sheets** and **People** APIs.
+   **Google Sheets**, **Google Slides** and **People** APIs.
 2. Set up the OAuth consent screen (External) and **publish it** ("In
    production"); otherwise Google expires your link every 7 days.
 3. Credentials → Create credentials → OAuth client ID → **Desktop app**.
@@ -113,7 +113,7 @@ only.
 | `agents`          | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | on |
 | `google.mail`     | `google_mail_search`, `_read`, `_attachment`, `_labels`, `_modify_labels`, `_draft`, `_drafts`, `_send`, `_send_draft`, `_trash`, `_subscribe`, `_unsubscribe` | off |
 | `google.calendar` | `google_calendar_list`, `_events`, `_get_event`, `_freebusy`, `_create_event`, `_update_event`, `_delete_event`, `_respond` | off |
-| `google.drive`    | `google_drive_search`, `_read`, `_download`, `_create`, `_update`, `_create_folder`, `_move`, `_trash`, `_permissions`, `_share`, `_unshare`, `_sheet_read`, `_sheet_write` | off |
+| `google.drive`    | `google_drive_search`, `_read`, `_download`, `_create`, `_update`, `_create_folder`, `_move`, `_trash`, `_permissions`, `_share`, `_unshare`, `_sheet_read`, `_sheet_write`, `_slides_read`, `_slides_create`, `_slides_edit` | off |
 | `google.contacts` | `google_contacts_search`                                        | off     |
 | `google`          | all of the above, plus account tools (`google_link`, …), which come with any `google.*` area | off |
 | `wallet`, `email` | not available yet                                               | —       |
