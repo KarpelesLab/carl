@@ -50,6 +50,12 @@ cargo build --release
 
 Run it directly only to smoke-test — normally the agent's MCP client launches it.
 
+The `carl` the client launches is a thin shim. The first one starts a background
+`carl daemon` that serves every agent on the machine, and the daemon exits by
+itself about a minute after the last agent disconnects. Its log is
+`~/.local/state/carl/daemon.log`. `carl standalone` serves in-process without a
+daemon. See [`ARCHITECTURE.md`](ARCHITECTURE.md#process-model).
+
 ### Smoke test
 
 ```sh
@@ -88,8 +94,10 @@ Carl reads its configuration from the environment:
 
 | Variable        | Default               | Purpose                                      |
 | --------------- | --------------------- | -------------------------------------------- |
-| `CARL_DATA_DIR` | `~/.carl`             | Where Carl persists state (keystore, caches) |
-| `RUST_LOG`      | `info`                | Log filter (logs go to **stderr**)           |
+| `CARL_DATA_DIR` | `$XDG_DATA_HOME/carl` (`~/.local/share/carl`) | Where Carl persists state (keystore). When set, the daemon log goes here too |
+| `CARL_IDLE_TIMEOUT` | `60`              | Seconds the daemon lingers with no agent connected |
+| `CARL_SOCKET`   | `/tmp/carl-<uid>/<hash>.sock` | Daemon socket (one per data dir) |
+| `RUST_LOG`      | `info`                | Log filter (logs go to **stderr**; the daemon's to `$XDG_STATE_HOME/carl/daemon.log`, i.e. `~/.local/state/carl`) |
 
 ## Roadmap
 

@@ -1,0 +1,266 @@
+//! End-to-end tests of the shim/daemon split: real `carl` processes, each test
+//! with its own data directory (and therefore its own daemon).
+
+use std::{
+    fs,
+    io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
+    process::{Child, ChildStdin, Command, Stdio},
+    sync::mpsc::{Receiver, channel},
+    thread,
+    time::{Duration, Instant},
+};
+
+use serde_json::{Value, json};
+
+const TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A fresh data dir, unique to this test run: a previous run's daemons may
+/// still be winding down in theirs.
+fn data_dir(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    dir
+}
+
+/// An MCP client driving one `carl` shim.
+struct Client {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    responses: Receiver<Value>,
+}
+
+impl Client {
+    fn start(data: &Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_carl"))
+            .env("CARL_DATA_DIR", data)
+            .env("CARL_IDLE_TIMEOUT", "1")
+            .env("CARL_HEALTH_INTERVAL", "1")
+            .env("RUST_LOG", "debug")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, responses) = channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(serde_json::from_str(&line).unwrap()).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut client = Self {
+            stdin: child.stdin.take(),
+            child,
+            responses,
+        };
+        client.send(json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "test", "version": "0"}},
+        }));
+        let init = client.recv();
+        assert_eq!(init["result"]["serverInfo"]["name"], "carl", "{init}");
+        client.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+        client
+    }
+
+    fn send(&mut self, msg: Value) {
+        let stdin = self.stdin.as_mut().unwrap();
+        writeln!(stdin, "{msg}").unwrap();
+        stdin.flush().unwrap();
+    }
+
+    fn recv(&self) -> Value {
+        self.responses.recv_timeout(TIMEOUT).expect("no response")
+    }
+
+    fn ping(&mut self, id: u64) -> Value {
+        self.send(json!({
+            "jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": "carl_ping", "arguments": {}},
+        }));
+        self.recv()
+    }
+
+    fn assert_pong(&mut self, id: u64) {
+        let resp = self.ping(id);
+        assert_eq!(resp["id"], id, "{resp}");
+        assert_eq!(resp["result"]["content"][0]["text"], "pong", "{resp}");
+    }
+
+    /// Close stdin, as a client does on shutdown, and wait for the shim.
+    fn close(mut self) {
+        drop(self.stdin.take());
+        let deadline = Instant::now() + TIMEOUT;
+        while self.child.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "shim did not exit");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Pid of the daemon currently holding the data dir's lock.
+fn daemon_pid(data: &Path) -> u32 {
+    let mut pid = None;
+    wait_until("the lock file names a daemon", || {
+        pid = fs::read_to_string(data.join("daemon.lock"))
+            .ok()
+            .and_then(|s| s.trim().parse().ok());
+        pid.is_some()
+    });
+    pid.unwrap()
+}
+
+/// The socket the (last started) daemon listens on, from its log.
+fn socket_path(data: &Path) -> PathBuf {
+    let log = fs::read_to_string(data.join("daemon.log")).unwrap();
+    let line = log
+        .lines()
+        .rfind(|l| l.contains("daemon listening"))
+        .unwrap();
+    PathBuf::from(line.split_once("socket=").unwrap().1.trim())
+}
+
+/// Running, as opposed to gone or a zombie. Zombies matter in containers, where
+/// PID 1 may never reap the orphaned daemon.
+fn alive(pid: u32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| Some(stat.rsplit_once(") ")?.1.starts_with(|c| c != 'Z')))
+        .unwrap_or(false)
+}
+
+fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
+    let deadline = Instant::now() + TIMEOUT;
+    while !cond() {
+        assert!(Instant::now() < deadline, "timed out waiting until {what}");
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn relays_tool_calls_through_daemon() {
+    let data = data_dir("relay");
+    let mut client = Client::start(&data);
+    client.assert_pong(1);
+    assert!(alive(daemon_pid(&data)));
+    client.close();
+}
+
+#[test]
+fn agents_share_one_daemon() {
+    let data = data_dir("shared");
+    let mut a = Client::start(&data);
+    let pid = daemon_pid(&data);
+    let mut b = Client::start(&data);
+    a.assert_pong(1);
+    b.assert_pong(1);
+    assert_eq!(daemon_pid(&data), pid);
+
+    let log = fs::read_to_string(data.join("daemon.log")).unwrap();
+    assert_eq!(log.matches("daemon listening").count(), 1, "{log}");
+    assert_eq!(log.matches("session opened").count(), 2, "{log}");
+}
+
+#[test]
+fn reconnects_after_daemon_dies() {
+    let data = data_dir("reconnect");
+    let mut client = Client::start(&data);
+    client.assert_pong(1);
+    let old = daemon_pid(&data);
+
+    let pid = rustix::process::Pid::from_raw(old as i32).unwrap();
+    rustix::process::kill_process(pid, rustix::process::Signal::KILL).unwrap();
+    wait_until("the old daemon is gone", || !alive(old));
+    wait_until("a new daemon is up", || {
+        fs::read_to_string(data.join("daemon.lock")).is_ok_and(|pid| pid.trim().parse() != Ok(old))
+    });
+
+    // Same session, no new initialize from the client.
+    client.assert_pong(2);
+    assert_ne!(daemon_pid(&data), old);
+}
+
+#[test]
+fn daemon_exits_when_idle() {
+    let data = data_dir("idle");
+    let mut client = Client::start(&data);
+    client.assert_pong(1);
+    let pid = daemon_pid(&data);
+    let socket = socket_path(&data);
+    assert!(socket.starts_with(format!("/tmp/carl-{}", rustix::process::getuid().as_raw())));
+    client.close();
+
+    wait_until("the daemon exits", || !alive(pid));
+    assert!(!socket.exists());
+}
+
+#[test]
+fn concurrent_starts_elect_one_daemon() {
+    let data = data_dir("race");
+    let clients: Vec<Client> = thread::scope(|s| {
+        let starts: Vec<_> = (0..10).map(|_| s.spawn(|| Client::start(&data))).collect();
+        starts.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for (i, mut client) in clients.into_iter().enumerate() {
+        client.assert_pong(i as u64 + 1);
+    }
+
+    let log = fs::read_to_string(data.join("daemon.log")).unwrap();
+    assert_eq!(log.matches("daemon listening").count(), 1, "{log}");
+    assert_eq!(log.matches("session opened").count(), 10, "{log}");
+}
+
+#[test]
+fn rebinds_a_deleted_socket() {
+    let data = data_dir("rebind");
+    let mut a = Client::start(&data);
+    a.assert_pong(1);
+    let pid = daemon_pid(&data);
+    let socket = socket_path(&data);
+
+    fs::remove_file(&socket).unwrap(); // as a /tmp cleaner would
+    wait_until("the socket is back", || socket.exists());
+
+    let mut b = Client::start(&data);
+    b.assert_pong(1);
+    a.assert_pong(2);
+    assert_eq!(daemon_pid(&data), pid);
+    let log = fs::read_to_string(data.join("daemon.log")).unwrap();
+    assert_eq!(log.matches("daemon listening").count(), 1, "{log}");
+}
+
+#[test]
+fn one_daemon_survives_a_deleted_lock() {
+    let data = data_dir("relock");
+    let mut a = Client::start(&data);
+    a.assert_pong(1);
+    let old = daemon_pid(&data);
+
+    // As `rm -rf` of the data dir would, minus the log we inspect. A new
+    // client then likely starts a second daemon on a fresh lock before the
+    // old one's health check runs; either way, only one may remain.
+    fs::remove_file(socket_path(&data)).unwrap();
+    fs::remove_file(data.join("daemon.lock")).unwrap();
+    let mut b = Client::start(&data);
+    b.assert_pong(1);
+
+    let owner = daemon_pid(&data);
+    if owner != old {
+        wait_until("the old daemon yields", || !alive(old));
+    }
+    assert!(alive(owner));
+    a.assert_pong(2);
+    b.assert_pong(2);
+}

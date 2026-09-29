@@ -6,7 +6,8 @@ Guidance for Claude Code (and other agents) working in this repository.
 
 Carl is a multipurpose MCP **server** (stdio, JSON-RPC) that gives an AI agent
 "hands" — real actions like holding/moving crypto and managing email. Built on
-the official Rust SDK, `rmcp`.
+the official Rust SDK, `rmcp`. The `carl` an MCP client launches is a shim; one
+per-user `carl daemon` runs the server for every agent on the machine.
 
 Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before making structural changes.
 
@@ -16,7 +17,8 @@ Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before making structural changes.
 cargo build              # debug build
 cargo clippy             # lint — keep it clean
 cargo test               # unit tests
-./target/debug/carl      # run (reads CARL_DATA_DIR, RUST_LOG from env)
+./target/debug/carl      # run the shim (reads CARL_DATA_DIR, CARL_SOCKET, CARL_IDLE_TIMEOUT, RUST_LOG)
+./target/debug/carl standalone   # in-process server, no daemon
 ```
 
 Quick MCP smoke test (handshake + a tool call) is in `README.md`.
@@ -36,7 +38,14 @@ Quick MCP smoke test (handshake + a tool call) is in `README.md`.
   Field doc-comments become the JSON Schema descriptions the agent sees.
 - **Unimplemented handlers** return `error::not_implemented("<tool>")` — keep the
   tool discoverable and typed rather than removing it.
-- `Carl` is `Clone` (cloned per request); hold all state behind `Arc`.
+- `Carl` is `Clone` (cloned per request); hold all state behind `Arc`. The
+  daemon shares one `Carl` across **all** agents' sessions, so state is global
+  unless keyed by session.
+- The shim ⇄ daemon hello (`src/ipc.rs`) must stay backward compatible: after an
+  update, old shims talk to the new daemon. Add fields only as
+  `#[serde(default)]`.
+- Code must also build for fullrust (static, libc-free): use `std`/`rustix`,
+  never `libc` or C dependencies.
 
 ## Security posture
 
