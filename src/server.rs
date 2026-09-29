@@ -213,11 +213,16 @@ mod tests {
         ];
         for tool in expected {
             assert!(names.contains(&tool.to_string()), "missing tool {tool}");
-            if let Some(area) = crate::areas::area_of(tool) {
-                assert!(
+        }
+        // Every tool is either an always-visible carl_* tool or in a known
+        // area; anything else would silently show up in every session.
+        for name in &names {
+            match crate::areas::area_of(name) {
+                Some(area) => assert!(
                     crate::areas::find(area).is_some(),
-                    "{tool} is in unknown area {area}"
-                );
+                    "{name}: unknown area {area}"
+                ),
+                None => assert!(name.starts_with("carl_"), "{name} has no area in areas.rs"),
             }
         }
         assert_eq!(
