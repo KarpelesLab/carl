@@ -589,26 +589,15 @@ fn agent_messages_are_pushed_as_channel_events() {
     let event = b.notification();
     assert_eq!(event["method"], "notifications/claude/channel", "{event}");
     let content = event["params"]["content"].as_str().unwrap();
-    assert!(content.contains("build is green"), "{content}");
-    assert!(content.contains("not the user"), "{content}");
+    // The event announces the message; it never carries its text.
+    assert!(!content.contains("build is green"), "{content}");
+    assert!(
+        content.contains("not the user") && content.contains("agent_inbox"),
+        "{content}"
+    );
     assert_eq!(event["params"]["meta"]["kind"], "agent_message");
     assert_eq!(event["params"]["meta"]["from_id"], whoami["id"].to_string());
 
-    // Long messages are clipped in the event; the inbox has them whole.
-    let long = "x".repeat(3000);
-    a.call(3, "agent_send", json!({"to": "listener", "message": long}));
-    let content = b.notification()["params"]["content"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert!(
-        content.contains("truncated") && content.len() < 2600,
-        "{}",
-        content.len()
-    );
     let (_, inbox) = b.call(2, "agent_inbox", json!({}));
-    assert_eq!(
-        inbox["data"]["messages"][1]["text"].as_str().unwrap().len(),
-        3000
-    );
+    assert_eq!(inbox["data"]["messages"][0]["text"], "build is green");
 }

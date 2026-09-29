@@ -109,8 +109,12 @@ whatever MCP client it comes from (Claude Code, Codex, …):
 - **Messaging:** `agent_send` queues a message for an id, a name, or `all`.
   `agent_inbox` drains the caller's inbox and can long-poll up to 120s.
   Sessions whose Claude Code loaded Carl as a channel are also woken at once
-  by a `notifications/claude/channel` event carrying the message (clipped to
-  2000 characters, labeled as not from the user); other clients poll.
+  by a `notifications/claude/channel` event; other clients poll.
+- **Channel events never carry content**, for mail or agent messages alike:
+  they say what arrived and from whom (account, sender address or agent id,
+  message id), and the agent reads it through a tool (`agent_inbox`,
+  `google_mail_read`), which returns it marked untrusted. Pushed text would
+  enter the model's context unasked; fetched text is the agent's choice.
 - **Trust:** messages are returned wrapped as untrusted. Another agent is not
   the user, and a message never authorizes anything.
 - The session's `Carl` knows its agent id (`Carl::for_session`); in
