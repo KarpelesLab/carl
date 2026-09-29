@@ -8,6 +8,7 @@
 //! The protocol owns stdout, so all logging goes to stderr (configurable via
 //! the `RUST_LOG` environment variable, e.g. `RUST_LOG=debug`).
 
+mod agents;
 mod config;
 mod daemon;
 mod error;

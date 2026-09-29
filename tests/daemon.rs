@@ -32,7 +32,13 @@ struct Client {
 
 impl Client {
     fn start(data: &Path) -> Self {
+        Self::start_in(data, Path::new(env!("CARGO_TARGET_TMPDIR")))
+    }
+
+    /// Start a client whose shim runs in `cwd`, as an agent started there.
+    fn start_in(data: &Path, cwd: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_carl"))
+            .current_dir(cwd)
             .env("CARL_DATA_DIR", data)
             .env("CARL_IDLE_TIMEOUT", "1")
             .env("CARL_HEALTH_INTERVAL", "1")
@@ -76,6 +82,22 @@ impl Client {
 
     fn recv(&self) -> Value {
         self.responses.recv_timeout(TIMEOUT).expect("no response")
+    }
+
+    /// Call `tool`; returns (is_error, text parsed as JSON or as a string).
+    fn call(&mut self, id: u64, tool: &str, args: Value) -> (bool, Value) {
+        self.send(json!({
+            "jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": tool, "arguments": args},
+        }));
+        self.parse(self.recv())
+    }
+
+    fn parse(&self, resp: Value) -> (bool, Value) {
+        let result = &resp["result"];
+        let text = result["content"][0]["text"].as_str().unwrap_or_default();
+        let value = serde_json::from_str(text).unwrap_or_else(|_| json!(text));
+        (result["isError"] == json!(true), value)
     }
 
     fn ping(&mut self, id: u64) -> Value {
@@ -263,4 +285,97 @@ fn one_daemon_survives_a_deleted_lock() {
     assert!(alive(owner));
     a.assert_pong(2);
     b.assert_pong(2);
+}
+
+#[test]
+fn agents_describe_list_and_message_each_other() {
+    let data = data_dir("agents");
+    let (dir_a, dir_b) = (data.join("proj-a"), data.join("proj-b"));
+    fs::create_dir_all(&dir_a).unwrap();
+    fs::create_dir_all(&dir_b).unwrap();
+    let mut a = Client::start_in(&data, &dir_a);
+    let mut b = Client::start_in(&data, &dir_b);
+
+    let (err, me) = a.call(
+        1,
+        "agent_describe",
+        json!({"task": "refactoring billing", "name": "biller"}),
+    );
+    assert!(!err, "{me}");
+    assert_eq!(me["name"], "biller");
+
+    // B sees A: where it started, which client, what it's doing.
+    let (_, list) = b.call(1, "agent_list", json!({}));
+    let agents = list["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 2, "{list}");
+    let seen_a = agents.iter().find(|x| x["name"] == "biller").unwrap();
+    assert_eq!(seen_a["cwd"], dir_a.display().to_string());
+    assert_eq!(seen_a["client"], "test 0");
+    assert_eq!(seen_a["task"], "refactoring billing");
+    assert_eq!(seen_a["you"], false);
+    let (_, me_b) = b.call(2, "agent_whoami", json!({}));
+    assert_eq!(me_b["name"], "test@proj-b");
+
+    // A waits for mail; B's message wakes it up.
+    a.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {"name": "agent_inbox", "arguments": {"wait_seconds": 30}}}));
+    thread::sleep(Duration::from_millis(300));
+    let started = Instant::now();
+    let (err, sent) = b.call(
+        3,
+        "agent_send",
+        json!({"to": "biller", "message": "leave src/billing to me"}),
+    );
+    assert!(!err, "{sent}");
+    let (_, inbox) = a.parse(a.recv());
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the wait wasn't woken"
+    );
+    assert!(inbox["notice"].as_str().unwrap().contains("not the user"));
+    let message = &inbox["data"]["messages"][0];
+    assert_eq!(message["text"], "leave src/billing to me");
+    assert_eq!(message["from"]["name"], "test@proj-b");
+    assert_eq!(message["from"]["cwd"], dir_b.display().to_string());
+
+    // Read messages are gone; a disconnected agent leaves the list.
+    let (_, inbox) = a.call(3, "agent_inbox", json!({}));
+    assert_eq!(inbox["data"]["messages"], json!([]));
+    b.close();
+    wait_until("B leaves the agent list", || {
+        let (_, list) = a.call(4, "agent_list", json!({}));
+        list["agents"].as_array().unwrap().len() == 1
+    });
+    let (err, _) = a.call(5, "agent_send", json!({"to": "all", "message": "anyone?"}));
+    assert!(err);
+}
+
+#[test]
+fn agent_tools_need_the_daemon() {
+    let data = data_dir("standalone");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_carl"))
+        .arg("standalone")
+        .env("CARL_DATA_DIR", &data)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for msg in [
+        json!({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+               "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                          "clientInfo": {"name": "t", "version": "0"}}}),
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "agent_list", "arguments": {}}}),
+    ] {
+        writeln!(stdin, "{msg}").unwrap();
+    }
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    lines.next(); // initialize
+    let resp: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(resp["result"]["isError"], true, "{resp}");
+    drop(stdin);
+    let _ = child.wait();
 }

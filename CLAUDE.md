@@ -31,7 +31,7 @@ Quick MCP smoke test (handshake + a tool call) is in `README.md`.
   router (`#[tool_router(router = <name>_router, vis = "pub(crate)")]`) that is
   summed into the composed router in `src/server.rs` (`Carl::new`). The recipe
   for adding a feature is in `ARCHITECTURE.md`.
-- **Tool naming:** prefix with the feature area — `wallet_*`, `email_*`,
+- **Tool naming:** prefix with the feature area — `wallet_*`, `email_*`, `agent_*`,
   `carl_*` for system tools. Set an explicit `#[tool(name = "…", description =
   "…")]`; descriptions are read by the agent, so make them actionable.
 - **Arguments:** use `Parameters<T>` with `T: Deserialize + schemars::JsonSchema`.
@@ -67,6 +67,8 @@ the codebase (see `docs/wallet.md`).
 ## Current state
 
 - `system` — implemented (`carl_status`, `carl_ping`).
+- `agents` — implemented: agents on the machine describe themselves, list
+  each other, and exchange messages (`agent_*`, daemon only).
 - `google` — implemented: account linking, Gmail/Calendar/Drive/Contacts
   read, and writes that only affect the user. See `docs/google.md`. HTTP goes
   through rsurl; crypto helpers come from purecrypto (no extra crates).

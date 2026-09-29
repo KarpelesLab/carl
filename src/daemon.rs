@@ -33,6 +33,7 @@ use tokio::runtime::Handle;
 use tokio_util::io::SyncIoBridge;
 
 use crate::{
+    agents::Agents,
     config::Config,
     ipc::{self, ClientHello, DaemonHello},
     server::Carl,
@@ -252,6 +253,11 @@ fn serve_connection(
         shim_version = hello.version,
         "session opened"
     );
+    let agent = AgentGuard {
+        agents: carl.agents.clone(),
+        id: carl.agents.register(&hello),
+    };
+    let carl = carl.for_session(agent.id);
 
     let (server_io, bridge_io) = tokio::io::duplex(PIPE_SIZE);
     let (bridge_read, bridge_write) = tokio::io::split(bridge_io);
@@ -279,9 +285,16 @@ fn serve_connection(
         }
     });
 
+    let agents = carl.agents.clone();
     let result = handle.block_on(async move {
         let service = carl.serve(tokio::io::split(server_io)).await?;
+        if let Some(info) = service.peer().peer_info() {
+            let client = &info.client_info;
+            agents.set_client(agent.id, &client.name, &client.version);
+            tracing::info!(agent = agent.id, client = client.name, "agent initialized");
+        }
         service.waiting().await?;
+        drop(agent);
         anyhow::Ok(())
     });
 
@@ -289,6 +302,18 @@ fn serve_connection(
     let _ = outbound.join();
     tracing::info!(session = session.id, "session closed");
     result
+}
+
+/// Removes an agent from the registry when its session ends, however it ends.
+struct AgentGuard {
+    agents: Arc<Agents>,
+    id: u32,
+}
+
+impl Drop for AgentGuard {
+    fn drop(&mut self) {
+        self.agents.unregister(self.id);
+    }
 }
 
 /// Live-session bookkeeping, for idle exit and log correlation. Also where

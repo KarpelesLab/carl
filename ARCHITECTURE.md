@@ -87,6 +87,29 @@ find and message each other.
   agent restarting. Nothing polls: the main thread sleeps until a session
   closes, the idle deadline passes, or the next health check is due.
 
+### Agents
+
+Every shim connection is an **agent** in the daemon's registry (`agents.rs`),
+whatever MCP client it comes from (Claude Code, Codex, …):
+
+- **Identity:** the id is the shim's pid, so it survives the shim
+  reconnecting after a daemon restart. The registry records the directory the
+  agent was started in and the agent's pid (from the hello), plus the MCP
+  client's name and version (from `initialize`). The default name is
+  `<client>@<directory>`.
+- **Self-description:** `agent_describe` sets what the agent is working on and
+  optionally a unique name. The server instructions ask agents to call it when
+  they start a task.
+- **Messaging:** `agent_send` queues a message for an id, a name, or `all`.
+  `agent_inbox` drains the caller's inbox and can long-poll up to 120s. MCP
+  can't push into a model's context, so receiving is always a tool call.
+- **Trust:** messages are returned wrapped as untrusted. Another agent is not
+  the user, and a message never authorizes anything.
+- The session's `Carl` knows its agent id (`Carl::for_session`); in
+  `carl standalone` there is no registry and the agent tools say so.
+- Registry and inboxes are daemon memory: an update or restart clears task
+  descriptions and unread messages (agents re-register on reconnect).
+
 ### Updates
 
 Releases are static, libc-free x86_64 Linux binaries built with
@@ -145,6 +168,7 @@ src/
 ├── error.rs             Small McpError constructors (e.g. not_implemented).
 ├── server.rs            `Carl` ServerHandler; composes feature tool routers.
 ├── update.rs            rsupd self-update (daemon, official builds).
+├── agents.rs            Registry of connected agents and their inboxes.
 ├── google/              Google plumbing: OAuth linking, token store, REST.
 │   ├── mod.rs           `Google`: accounts, token refresh, loopback link flow.
 │   ├── oauth.rs         Scopes per area, PKCE, token endpoint calls.
@@ -154,6 +178,7 @@ src/
 └── features/
     ├── mod.rs           Declares the feature modules.
     ├── system.rs        Introspection tools (status, ping). Always available.
+    ├── agents.rs        agent_* tools: describe, list, message other agents.
     ├── wallet.rs        Crypto wallet (scaffold).
     ├── email.rs         Email management (scaffold).
     └── google/          google_* tools, one router per area (mail, calendar,

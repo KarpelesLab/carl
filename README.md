@@ -33,6 +33,7 @@ material), Carl is the trust boundary between the agent and the real world.
 | Area     | Tools                                                   | Status      |
 | -------- | ------------------------------------------------------- | ----------- |
 | `system` | `carl_status`, `carl_ping`                              | ✅ available |
+| `agents` | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | ✅ available |
 | `wallet` | `wallet_balance`, `wallet_address`, `wallet_send`       | 🚧 scaffold |
 | `email`  | `email_create`, `email_list`, `email_send`              | 🚧 scaffold |
 | `google` | `google_link`, `google_mail_*`, `google_calendar_*`, `google_drive_*`, `google_contacts_search` | ✅ available |
