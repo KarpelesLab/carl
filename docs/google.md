@@ -68,7 +68,7 @@ files directly. Real isolation needs agents sandboxed from Carl's data dir
 
 | Area     | Scope                   | Tools today                                      | Waits for approvals (Paul)        |
 | -------- | ----------------------- | ------------------------------------------------ | --------------------------------- |
-| mail     | `gmail.modify`          | search, read, labels, **drafts**                 | send, delete, label changes       |
+| mail     | `gmail.modify`          | search, read, labels, **drafts**, label changes (archive, read, not spam…) | send, delete |
 | calendar | `calendar`              | list, events, free/busy, create (primary, no guests) | invite, RSVP, edit, delete    |
 | drive    | `drive`                 | search, read as text, create/update private files | share, delete, edit shared files |
 | contacts | `contacts.readonly`     | search                                           | —                                 |

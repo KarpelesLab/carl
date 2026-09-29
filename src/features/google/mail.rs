@@ -68,6 +68,61 @@ pub struct DraftArgs {
     pub reply_to_message_id: Option<String>,
 }
 
+/// Arguments for [`Carl::google_mail_modify_labels`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ModifyLabelsArgs {
+    /// Linked account to use (email). Optional when only one is linked.
+    #[serde(default)]
+    pub account: Option<String>,
+    /// A message id from google_mail_search.
+    #[serde(default)]
+    pub message_id: Option<String>,
+    /// A thread id, to change every message in the conversation.
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    /// Labels to add: system ones (`INBOX`, `UNREAD`, `STARRED`,
+    /// `IMPORTANT`, `SPAM`) or the user's labels by name.
+    #[serde(default)]
+    pub add: Vec<String>,
+    /// Labels to remove, same forms as `add`.
+    #[serde(default)]
+    pub remove: Vec<String>,
+}
+
+/// Labels that can't be set or cleared here: moving to trash is deleting
+/// (waits for approvals), and sent/draft aren't states to move mail into.
+const RESERVED_LABELS: [&str; 3] = ["TRASH", "SENT", "DRAFT"];
+
+/// Resolve label names or ids against the account's `labels` list (as from
+/// `users.labels.list`) into label ids.
+fn resolve_labels(labels: &Value, wanted: &[String]) -> anyhow::Result<Vec<String>> {
+    let known: Vec<(&str, &str)> = labels["labels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|l| Some((l["id"].as_str()?, l["name"].as_str()?)))
+        .collect();
+    wanted
+        .iter()
+        .map(|w| {
+            let w = w.trim();
+            if RESERVED_LABELS.iter().any(|r| r.eq_ignore_ascii_case(w)) {
+                anyhow::bail!(
+                    "{w} can't be changed here (deleting waits for approvals support); \
+                     to archive, remove INBOX instead"
+                );
+            }
+            known
+                .iter()
+                .find(|(id, name)| *id == w || name.eq_ignore_ascii_case(w))
+                .map(|(id, _)| id.to_string())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("no label {w} in this account; google_mail_labels lists them")
+                })
+        })
+        .collect()
+}
+
 /// Arguments for [`Carl::google_mail_subscribe`].
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SubscribeArgs {
@@ -317,5 +372,86 @@ impl Carl {
             Ok(json!({ "unsubscribed": key, "subscriptions": agents.subscriptions(me) }))
         })
         .await
+    }
+
+    #[tool(
+        name = "google_mail_modify_labels",
+        description = "Change the labels of a Gmail message (message_id) or whole conversation (thread_id). Examples: not spam = remove [\"SPAM\"], add [\"INBOX\"]; archive = remove [\"INBOX\"]; mark read = remove [\"UNREAD\"]; star = add [\"STARRED\"]; file = add [\"<label name>\"]. Only affects the mailbox itself. Deleting (TRASH) isn't available yet."
+    )]
+    async fn google_mail_modify_labels(
+        &self,
+        Parameters(args): Parameters<ModifyLabelsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        run(&self.google, move |google| {
+            let account = google.account_for(args.account.as_deref(), Area::Mail)?;
+            if args.add.is_empty() && args.remove.is_empty() {
+                anyhow::bail!("pass labels to `add` and/or `remove`");
+            }
+            let labels = google.api(&account, "GET", &format!("{GMAIL}/labels"), None)?;
+            let add = resolve_labels(&labels, &args.add)?;
+            let remove = resolve_labels(&labels, &args.remove)?;
+            let target = match (&args.thread_id, &args.message_id) {
+                (Some(thread), _) => format!("threads/{}", url_encode(thread)),
+                (None, Some(id)) => format!("messages/{}", url_encode(id)),
+                (None, None) => anyhow::bail!("pass message_id or thread_id"),
+            };
+            let resp = google.api(
+                &account,
+                "POST",
+                &format!("{GMAIL}/{target}/modify"),
+                Some(json!({ "addLabelIds": add, "removeLabelIds": remove })),
+            )?;
+            // A thread answers with its messages, a message with its labels.
+            let label_ids: Vec<Value> = match resp["messages"].as_array() {
+                Some(messages) => messages
+                    .iter()
+                    .flat_map(|m| m["labelIds"].as_array().cloned().unwrap_or_default())
+                    .collect(),
+                None => resp["labelIds"].as_array().cloned().unwrap_or_default(),
+            };
+            let mut now: Vec<String> = label_ids
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|id| {
+                    labels["labels"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|l| l["id"] == id)
+                        .and_then(|l| l["name"].as_str())
+                        .unwrap_or(id)
+                        .to_string()
+                })
+                .collect();
+            now.sort();
+            now.dedup();
+            Ok(json!({ "account": account, "updated": target, "labels_now": now }))
+        })
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_resolve_by_name_or_id_and_reserved_ones_are_refused() {
+        let labels = json!({"labels": [
+            {"id": "INBOX", "name": "INBOX"},
+            {"id": "SPAM", "name": "SPAM"},
+            {"id": "Label_7", "name": "Receipts"},
+        ]});
+        let got = resolve_labels(
+            &labels,
+            &["inbox".into(), "receipts".into(), "Label_7".into()],
+        )
+        .unwrap();
+        assert_eq!(got, ["INBOX", "Label_7", "Label_7"]);
+        assert!(resolve_labels(&labels, &["nope".into()]).is_err());
+        let err = resolve_labels(&labels, &["trash".into()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("remove INBOX"), "{err}");
     }
 }

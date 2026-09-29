@@ -109,7 +109,7 @@ only.
 | Area              | Tools                                                           | Default |
 | ----------------- | --------------------------------------------------------------- | ------- |
 | `agents`          | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | on |
-| `google.mail`     | `google_mail_search`, `_read`, `_labels`, `_draft`, `_subscribe`, `_unsubscribe` | off |
+| `google.mail`     | `google_mail_search`, `_read`, `_labels`, `_draft`, `_modify_labels`, `_subscribe`, `_unsubscribe` | off |
 | `google.calendar` | `google_calendar_list`, `_events`, `_freebusy`, `_create_event` | off     |
 | `google.drive`    | `google_drive_search`, `_read`, `_create`, `_update`            | off     |
 | `google.contacts` | `google_contacts_search`                                        | off     |

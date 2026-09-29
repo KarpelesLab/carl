@@ -214,6 +214,7 @@ mod tests {
             "google_mail_read",
             "google_mail_labels",
             "google_mail_draft",
+            "google_mail_modify_labels",
             "google_mail_subscribe",
             "google_mail_unsubscribe",
             "google_calendar_list",
