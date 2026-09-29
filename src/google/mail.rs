@@ -87,6 +87,7 @@ fn collect_attachments(part: &Value, out: &mut Vec<Value>) {
             "filename": name,
             "mime_type": part["mimeType"],
             "size": part["body"]["size"],
+            "attachment_id": part["body"]["attachmentId"],
         }));
     }
     for p in part["parts"].as_array().into_iter().flatten() {
@@ -158,12 +159,21 @@ pub fn truncate(s: &str, max: usize) -> (String, bool) {
     }
 }
 
-/// A draft to build.
+/// A file attached to a message.
+pub struct Attachment {
+    pub filename: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
+/// A message to build (a draft, or one to send).
 pub struct Draft<'a> {
     pub to: &'a [String],
     pub cc: &'a [String],
+    pub bcc: &'a [String],
     pub subject: &'a str,
     pub body: &'a str,
+    pub attachments: &'a [Attachment],
     /// `Message-ID` of the message this replies to.
     pub in_reply_to: Option<&'a str>,
     /// `References` of the message this replies to.
@@ -171,23 +181,30 @@ pub struct Draft<'a> {
 }
 
 /// An RFC 5322 message for `draft`. `From` is left to Gmail (the account's
-/// default address).
+/// default address). With attachments it is `multipart/mixed`.
 pub fn build_message(draft: &Draft) -> Result<Vec<u8>> {
-    if draft.to.is_empty() {
-        bail!("a draft needs at least one recipient");
+    if draft.to.is_empty() && draft.cc.is_empty() && draft.bcc.is_empty() {
+        bail!("a message needs at least one recipient");
     }
     if draft.subject.contains(['\r', '\n']) {
         bail!("Subject must be a single line");
     }
-    let mut headers = vec![
-        ("To", draft.to.join(", ")),
-        ("Subject", encode_word(draft.subject)),
-        ("MIME-Version", "1.0".to_string()),
-        ("Content-Type", "text/plain; charset=UTF-8".to_string()),
-        ("Content-Transfer-Encoding", "base64".to_string()),
-    ];
-    if !draft.cc.is_empty() {
-        headers.push(("Cc", draft.cc.join(", ")));
+    let boundary = format!("carl-{}", super::encoding::random_token(12));
+    let mut headers = vec![("Subject", encode_word(draft.subject))];
+    for (name, list) in [("To", draft.to), ("Cc", draft.cc), ("Bcc", draft.bcc)] {
+        if !list.is_empty() {
+            headers.push((name, list.join(", ")));
+        }
+    }
+    headers.push(("MIME-Version", "1.0".to_string()));
+    if draft.attachments.is_empty() {
+        headers.push(("Content-Type", "text/plain; charset=UTF-8".to_string()));
+        headers.push(("Content-Transfer-Encoding", "base64".to_string()));
+    } else {
+        headers.push((
+            "Content-Type",
+            format!("multipart/mixed; boundary=\"{boundary}\""),
+        ));
     }
     if let Some(id) = draft.in_reply_to {
         headers.push(("In-Reply-To", id.to_string()));
@@ -208,18 +225,84 @@ pub fn build_message(draft: &Draft) -> Result<Vec<u8>> {
         out.push_str(&format!("{name}: {value}\r\n"));
     }
     out.push_str("\r\n");
-    let body = b64_std_encode(
-        draft
-            .body
-            .replace("\r\n", "\n")
-            .replace('\n', "\r\n")
-            .as_bytes(),
-    );
-    for chunk in body.as_bytes().chunks(76) {
-        out.push_str(std::str::from_utf8(chunk).unwrap());
+    let text = draft.body.replace("\r\n", "\n").replace('\n', "\r\n");
+    if draft.attachments.is_empty() {
+        push_base64(&mut out, text.as_bytes());
+        return Ok(out.into_bytes());
+    }
+
+    out.push_str(&format!(
+        "--{boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\n"
+    ));
+    push_base64(&mut out, text.as_bytes());
+    for a in draft.attachments {
+        let mime = if a.mime_type.contains(['\r', '\n', '"', ';']) || a.mime_type.is_empty() {
+            "application/octet-stream"
+        } else {
+            a.mime_type.as_str()
+        };
+        let name = filename_param(&a.filename);
+        out.push_str(&format!(
+            "--{boundary}\r\nContent-Type: {mime}\r\n\
+             Content-Disposition: attachment; {name}\r\n\
+             Content-Transfer-Encoding: base64\r\n\r\n"
+        ));
+        push_base64(&mut out, &a.data);
+    }
+    out.push_str(&format!("--{boundary}--\r\n"));
+    Ok(out.into_bytes())
+}
+
+/// Append `data` as base64 in 76-character lines.
+fn push_base64(out: &mut String, data: &[u8]) {
+    let encoded = b64_std_encode(data);
+    for chunk in encoded.as_bytes().chunks(76) {
+        out.push_str(std::str::from_utf8(chunk).expect("base64 is ASCII"));
         out.push_str("\r\n");
     }
-    Ok(out.into_bytes())
+}
+
+/// `filename="…"` for plain names, else RFC 2231 `filename*=UTF-8''…`.
+fn filename_param(name: &str) -> String {
+    let name = super::safe_filename(name);
+    if name
+        .bytes()
+        .all(|b| (0x20..0x7f).contains(&b) && b != b'"' && b != b'\\')
+    {
+        format!("filename=\"{name}\"")
+    } else {
+        format!("filename*=UTF-8''{}", super::encoding::url_encode(&name))
+    }
+}
+
+/// A MIME type guessed from a file name's extension.
+pub fn mime_for(filename: &str) -> &'static str {
+    let ext = filename
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("txt" | "log") => "text/plain",
+        Some("md") => "text/markdown",
+        Some("csv") => "text/csv",
+        Some("html" | "htm") => "text/html",
+        Some("json") => "application/json",
+        Some("xml") => "application/xml",
+        Some("pdf") => "application/pdf",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("zip") => "application/zip",
+        Some("doc") => "application/msword",
+        Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Some("xls") => "application/vnd.ms-excel",
+        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("ppt") => "application/vnd.ms-powerpoint",
+        Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => "application/octet-stream",
+    }
 }
 
 /// `s` as an RFC 2047 encoded-word if it isn't plain ASCII.
@@ -278,6 +361,8 @@ mod tests {
         let msg = build_message(&Draft {
             to: &to,
             cc: &[],
+            bcc: &[],
+            attachments: &[],
             subject: "Café",
             body: "line1\nline2",
             in_reply_to: Some("<a@x>"),
@@ -286,7 +371,7 @@ mod tests {
         .unwrap();
         let msg = String::from_utf8(msg).unwrap();
         assert!(
-            msg.starts_with("To: Bob <bob@x.com>\r\nSubject: =?UTF-8?B?Q2Fmw6k=?=\r\n"),
+            msg.starts_with("Subject: =?UTF-8?B?Q2Fmw6k=?=\r\nTo: Bob <bob@x.com>\r\n"),
             "{msg}"
         );
         assert!(
@@ -303,6 +388,8 @@ mod tests {
         let draft = Draft {
             to: &to,
             cc: &[],
+            bcc: &[],
+            attachments: &[],
             subject: "s",
             body: "b",
             in_reply_to: None,
@@ -313,12 +400,62 @@ mod tests {
         let draft = Draft {
             to: &to,
             cc: &[],
+            bcc: &[],
+            attachments: &[],
             subject: "a\nb",
             body: "",
             in_reply_to: None,
             references: None,
         };
         assert!(build_message(&draft).is_err());
+    }
+
+    #[test]
+    fn attachments_make_a_multipart_message() {
+        let to = vec!["bob@x.com".to_string()];
+        let bcc = vec!["eve@x.com".to_string()];
+        let attachments = [
+            Attachment {
+                filename: "../notes.txt".into(),
+                mime_type: mime_for("notes.txt").into(),
+                data: b"hi".to_vec(),
+            },
+            Attachment {
+                filename: "résumé.pdf".into(),
+                mime_type: "x\r\nBcc: z".into(),
+                data: vec![0, 1, 2],
+            },
+        ];
+        let msg = build_message(&Draft {
+            to: &to,
+            cc: &[],
+            bcc: &bcc,
+            subject: "files",
+            body: "see attached",
+            attachments: &attachments,
+            in_reply_to: None,
+            references: None,
+        })
+        .unwrap();
+        let msg = String::from_utf8(msg).unwrap();
+        assert!(msg.contains("Bcc: eve@x.com\r\n"), "{msg}");
+        let boundary = msg
+            .split("boundary=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert_eq!(
+            msg.matches(&format!("--{boundary}\r\n")).count(),
+            3,
+            "{msg}"
+        );
+        assert!(msg.ends_with(&format!("--{boundary}--\r\n")));
+        assert!(msg.contains("Content-Type: text/plain\r\nContent-Disposition: attachment; filename=\"notes.txt\""), "{msg}");
+        // A bad MIME type can't inject headers; non-ASCII names use RFC 2231.
+        assert!(msg.contains("Content-Type: application/octet-stream\r\nContent-Disposition: attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf"), "{msg}");
+        assert!(msg.contains(&b64_std_encode(b"hi")));
     }
 
     #[test]

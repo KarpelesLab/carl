@@ -200,6 +200,42 @@ impl Google {
         Ok(true)
     }
 
+    /// Whose account `email` is.
+    pub fn owner(&self, email: &str) -> Result<Owner> {
+        Ok(self
+            .store
+            .account(email)?
+            .ok_or_else(|| anyhow!("{email} is not linked"))?
+            .owner)
+    }
+
+    /// Until the approvals layer exists, actions that reach other people
+    /// (sending, inviting, sharing…) are only allowed from accounts dedicated
+    /// to Carl: from the user's own account they would speak for the user.
+    pub fn require_carl_owned(&self, email: &str, action: &str) -> Result<()> {
+        if self.owner(email)? == Owner::Carl {
+            return Ok(());
+        }
+        bail!(
+            "{action} from {email} would act in the user's name, which needs the approvals \
+             layer (not available yet). For now only accounts dedicated to Carl (owner \"carl\" \
+             in google_accounts) can do this; on the user's account, prepare it for them \
+             instead (e.g. a draft they send themselves)."
+        )
+    }
+
+    /// Save downloaded content as `filename` in Carl's downloads directory
+    /// (`~/Downloads/carl`, or `$CARL_DOWNLOADS_DIR`), never overwriting.
+    /// Carl only ever writes files there: an agent must not be able to have
+    /// it write anywhere else.
+    pub fn save_download(&self, filename: &str, data: &[u8]) -> Result<std::path::PathBuf> {
+        let dir = std::env::var_os("CARL_DOWNLOADS_DIR")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join("Downloads/carl")))
+            .ok_or_else(|| anyhow!("no home directory to download into"))?;
+        save_in(&dir, filename, data)
+    }
+
     /// Resolve which linked account a tool call is for, and check it granted
     /// `area`.
     pub fn account_for(&self, requested: Option<&str>, area: Area) -> Result<String> {
@@ -467,6 +503,59 @@ impl Google {
     }
 }
 
+/// Save `data` as `filename` in `dir`, adding " (n)" rather than overwriting.
+fn save_in(dir: &Path, filename: &str, data: &[u8]) -> Result<std::path::PathBuf> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::create_dir_all(dir)?;
+    let name = safe_filename(filename);
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name.clone(), String::new()),
+    };
+    for n in 0..1000 {
+        let candidate = if n == 0 {
+            dir.join(&name)
+        } else {
+            dir.join(format!("{stem} ({n}){ext}"))
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                file.write_all(data)?;
+                return Ok(candidate);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    bail!("too many files named {name} in {}", dir.display())
+}
+
+/// A file name safe to create: no directories, no hidden files, no control
+/// characters, bounded length.
+pub fn safe_filename(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c.is_control() || c == ':' { '_' } else { c })
+        .collect::<String>()
+        .trim()
+        .trim_start_matches('.')
+        .chars()
+        .take(200)
+        .collect();
+    if cleaned.is_empty() {
+        "download".into()
+    } else {
+        cleaned
+    }
+}
+
 fn list(accounts: &[Account]) -> String {
     if accounts.is_empty() {
         return "none".into();
@@ -608,5 +697,50 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("areas [\"drive\"]"), "{err}");
         assert!(google.account_for(Some("c@x.com"), Area::Mail).is_err());
+    }
+
+    #[test]
+    fn filenames_are_confined() {
+        assert_eq!(safe_filename("../../.bashrc"), "bashrc");
+        assert_eq!(safe_filename("/etc/passwd"), "passwd");
+        assert_eq!(safe_filename("a\\b\nc.pdf"), "b_c.pdf");
+        assert_eq!(safe_filename(""), "download");
+        assert_eq!(safe_filename("..."), "download");
+    }
+
+    #[test]
+    fn downloads_never_overwrite() {
+        let dir = std::env::temp_dir().join(format!("carl-dl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let a = save_in(&dir, "../report.pdf", b"one").unwrap();
+        let b = save_in(&dir, "report.pdf", b"two").unwrap();
+        assert_eq!(a, dir.join("report.pdf"));
+        assert_eq!(b, dir.join("report (1).pdf"));
+        assert_eq!(std::fs::read(&a).unwrap(), b"one");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn only_carl_owned_accounts_reach_others() {
+        let g = google();
+        for (email, owner) in [("me@x.com", Owner::User), ("carl@x.com", Owner::Carl)] {
+            g.store
+                .upsert_account(Account {
+                    email: email.into(),
+                    owner: Owner::User,
+                    refresh_token: "rt".into(),
+                    client_id: "123.apps.googleusercontent.com".into(),
+                    scopes: vec![],
+                    linked_at: 0,
+                })
+                .unwrap();
+            g.store.set_owner(email, owner).unwrap();
+        }
+        assert!(g.require_carl_owned("carl@x.com", "Sending mail").is_ok());
+        let err = g
+            .require_carl_owned("me@x.com", "Sending mail")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("draft"), "{err}");
     }
 }

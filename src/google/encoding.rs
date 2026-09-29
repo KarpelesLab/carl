@@ -88,6 +88,20 @@ pub fn b64url_decode(s: &str) -> Result<Vec<u8>> {
     base64url::decode(s.trim_end_matches('=')).map_err(|e| anyhow!("bad base64url: {e}"))
 }
 
+/// Decode standard base64 (padded or not), as agents send file content.
+pub fn b64_std_decode(s: &str) -> Result<Vec<u8>> {
+    let url: String = s
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .map(|c| match c {
+            '+' => '-',
+            '/' => '_',
+            c => c,
+        })
+        .collect();
+    b64url_decode(&url)
+}
+
 /// Standard, padded base64 (RFC 4648 §4), as MIME encoded-words need.
 pub fn b64_std_encode(data: &[u8]) -> String {
     let mut s: String = base64url::encode(data)
@@ -152,6 +166,8 @@ mod tests {
         assert_eq!(b64_std_encode(b"\xfb\xff"), "+/8=");
         assert_eq!(b64_std_encode(b"hello"), "aGVsbG8=");
         assert_eq!(b64url_decode("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(b64_std_decode("+/8=").unwrap(), b"\xfb\xff");
+        assert_eq!(b64_std_decode("aGVs\nbG8=").unwrap(), b"hello");
         assert_eq!(
             b64url_decode(&b64url_encode(b"\xfb\xff")).unwrap(),
             b"\xfb\xff"
