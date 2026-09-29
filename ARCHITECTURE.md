@@ -84,6 +84,10 @@ find and message each other.
 - **One connection = one rmcp session.** Each accepted socket runs on its own
   threads, with blocking socket I/O bridged into the tokio runtime through an
   in-memory duplex pipe.
+- **Log rotation:** the shim points the daemon's stderr at `daemon.log`. At
+  startup and every health check, once the log is over 10 MB the daemon
+  renames it to `daemon.log.1` (keeping `.1`–`.3`) and moves its stderr to a
+  fresh file (`dup2`), so tracing and panics follow.
 - **Idle exit:** once no shim has been connected for `CARL_IDLE_TIMEOUT`
   (default 60s), it removes the socket and exits. The grace period absorbs an
   agent restarting. Nothing polls: the main thread sleeps until a session

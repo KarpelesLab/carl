@@ -61,6 +61,8 @@ pub fn run(config: Config) -> Result<()> {
         tracing::info!("another daemon is already running");
         return Ok(());
     };
+    let log_path = config.log_path();
+    rotate_log_if_needed(&log_path);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -87,6 +89,7 @@ pub fn run(config: Config) -> Result<()> {
         if let Wake::Exit(reason) = sessions.wait(config.idle_timeout, config.health_interval) {
             break reason;
         }
+        rotate_log_if_needed(&log_path);
 
         // The lock file was deleted or replaced (say, `rm -rf` of the data
         // dir). Take the lock again on whatever is there now, unless a newer
@@ -124,6 +127,57 @@ pub fn run(config: Config) -> Result<()> {
     tracing::info!(reason, "exiting");
     runtime.shutdown_background();
     Ok(())
+}
+
+/// Size past which `daemon.log` is rotated.
+const LOG_MAX: u64 = 10 * 1024 * 1024;
+
+/// Rotated logs kept: `daemon.log.1` (newest) to `daemon.log.<LOG_KEEP>`.
+const LOG_KEEP: u32 = 3;
+
+/// Rotate `daemon.log` once it is over [`LOG_MAX`], if it is where our stderr
+/// goes (the shim starts us that way; a daemon started by hand in a terminal
+/// has nothing to rotate). Our stderr then moves to a fresh file, so logging
+/// and any panic output follow it.
+fn rotate_log_if_needed(path: &Path) {
+    let rotate = || -> io::Result<bool> {
+        let Ok(meta) = fs::metadata(path) else {
+            return Ok(false);
+        };
+        if meta.len() < LOG_MAX || !stderr_is(&meta) {
+            return Ok(false);
+        }
+        shift_logs(path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(path)?;
+        rustix::stdio::dup2_stderr(&file)?;
+        Ok(true)
+    };
+    match rotate() {
+        Ok(true) => tracing::info!(path = %path.display(), "log rotated"),
+        Ok(false) => {}
+        Err(e) => tracing::warn!(error = %e, "rotating the log failed"),
+    }
+}
+
+/// Whether our stderr is the file described by `meta`.
+fn stderr_is(meta: &fs::Metadata) -> bool {
+    fs::metadata("/proc/self/fd/2").is_ok_and(|s| s.dev() == meta.dev() && s.ino() == meta.ino())
+}
+
+/// `log.N-1` → `log.N` … `log` → `log.1`, dropping the oldest.
+fn shift_logs(path: &Path) -> io::Result<()> {
+    let numbered = |n: u32| PathBuf::from(format!("{}.{n}", path.display()));
+    for n in (1..LOG_KEEP).rev() {
+        match fs::rename(numbered(n), numbered(n + 1)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    fs::rename(path, numbered(1))
 }
 
 /// Take the daemon lock, waiting up to `wait`. `None` means another daemon
@@ -419,5 +473,41 @@ impl Drop for SessionGuard<'_> {
             state.idle_since = Instant::now();
             self.sessions.changed.notify_all();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logs_shift_and_the_oldest_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("carl-logs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("daemon.log");
+        let read = |name: &str| fs::read_to_string(dir.join(name)).ok();
+        for generation in 1..=5 {
+            fs::write(&log, format!("gen{generation}")).unwrap();
+            shift_logs(&log).unwrap();
+        }
+        assert_eq!(
+            read("daemon.log"),
+            None,
+            "moved away, reopened by the daemon"
+        );
+        assert_eq!(read("daemon.log.1").as_deref(), Some("gen5"));
+        assert_eq!(read("daemon.log.2").as_deref(), Some("gen4"));
+        assert_eq!(read("daemon.log.3").as_deref(), Some("gen3"));
+        assert_eq!(read("daemon.log.4"), None, "only LOG_KEEP kept");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_log_that_isnt_our_stderr_is_left_alone() {
+        let path = std::env::temp_dir().join(format!("carl-notstderr-{}", std::process::id()));
+        fs::write(&path, vec![0u8; 16]).unwrap();
+        assert!(!stderr_is(&fs::metadata(&path).unwrap()));
+        fs::remove_file(&path).unwrap();
     }
 }

@@ -542,3 +542,23 @@ fn sessions_resume_after_the_daemon_dies() {
     assert_eq!(me["task"], "long job");
     assert_ne!(daemon_pid(&data), old);
 }
+
+#[test]
+fn an_oversized_log_is_rotated_and_logging_continues() {
+    let data = data_dir("logrotate");
+    fs::create_dir_all(&data).unwrap();
+    let log = data.join("daemon.log");
+    fs::write(&log, "old line\n".repeat(1_200_000)).unwrap(); // ~10.8 MB
+
+    let mut client = Client::start(&data);
+    client.assert_pong(1);
+    let (_, _) = client.call(2, "agent_describe", json!({"task": "rotating"}));
+
+    let old = fs::read_to_string(data.join("daemon.log.1")).unwrap();
+    assert!(old.starts_with("old line\n"), "the big log moved to .1");
+    wait_until("the new log gets the daemon's lines", || {
+        fs::read_to_string(&log)
+            .is_ok_and(|l| l.contains("log rotated") && l.contains("session opened"))
+    });
+    assert!(fs::metadata(&log).unwrap().len() < 1024 * 1024);
+}
