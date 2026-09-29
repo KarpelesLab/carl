@@ -151,7 +151,8 @@ new version is installed.
 
 Your data stays on your machine: linked accounts live in
 `~/.local/share/carl` (private to your user), and nothing is sent to Carl's
-authors. The daemon logs to `~/.local/state/carl/daemon.log`.
+authors. The daemon logs to `~/.local/state/carl/daemon.log`, rotated at
+10 MB (three old logs kept).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design.
 
