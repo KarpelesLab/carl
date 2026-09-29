@@ -1,11 +1,11 @@
 [package]
-name = "manu"
+name = "carl"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-description = "Manu — a multipurpose MCP helper that gives AI agents hands: wallets, email, and more, over stdio."
-repository = "https://github.com/KarpelesLab/manu"
+description = "Carl — a multipurpose MCP helper that gives AI agents hands: wallets, email, and more, over stdio."
+repository = "https://github.com/KarpelesLab/carl"
 readme = "README.md"
 keywords = ["mcp", "ai", "agent", "wallet", "email"]
 categories = ["command-line-utilities"]

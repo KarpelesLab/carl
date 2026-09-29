@@ -25,13 +25,13 @@ Likely additions: `email_inbox` / `email_read` (receive and read messages),
 ## Open design questions
 
 - **API integration.** Which Karpelès Lab endpoints back create/list/send and
-  inbox retrieval? How is Manu authenticated to them (API key in
-  `MANU_DATA_DIR`, OAuth, …)? Receiving likely needs polling or a webhook/relay
+  inbox retrieval? How is Carl authenticated to them (API key in
+  `CARL_DATA_DIR`, OAuth, …)? Receiving likely needs polling or a webhook/relay
   — stdio has no inbound channel, so incoming mail is surfaced via a `wait`/poll
   tool the agent calls.
 - **Address lifecycle.** Naming/domains for created addresses, quotas, and
   cleanup of disposable addresses.
-- **Sending constraints.** `from` must be an address Manu manages; rate limits
+- **Sending constraints.** `from` must be an address Carl manages; rate limits
   and anti-abuse so the agent can't be used to send spam.
 - **Content & safety.** Plain text first; HTML/attachments later. Validate
   recipients; consider a send-confirmation step mirroring the wallet's spend
@@ -39,7 +39,7 @@ Likely additions: `email_inbox` / `email_read` (receive and read messages),
 
 ## Notes
 
-- Receiving is fundamentally pull-based here: the agent asks Manu to check or
-  wait for mail; Manu does not push.
+- Receiving is fundamentally pull-based here: the agent asks Carl to check or
+  wait for mail; Carl does not push.
 - Treat API credentials with the same care as wallet secrets — never in logs or
   tool output.

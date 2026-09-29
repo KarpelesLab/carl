@@ -13,9 +13,9 @@ use rmcp::{
 };
 use serde::Deserialize;
 
-use crate::{error::not_implemented, server::Manu};
+use crate::{error::not_implemented, server::Carl};
 
-/// Arguments for [`Manu::email_create`].
+/// Arguments for [`Carl::email_create`].
 // Fields define the tool's JSON schema (via serde/schemars); they are wired to
 // real logic when the handler is implemented.
 #[allow(dead_code)]
@@ -26,11 +26,11 @@ pub struct CreateAddressArgs {
     pub name: Option<String>,
 }
 
-/// Arguments for [`Manu::email_send`].
+/// Arguments for [`Carl::email_send`].
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SendEmailArgs {
-    /// Sending address (must be one Manu manages).
+    /// Sending address (must be one Carl manages).
     pub from: String,
     /// Recipient address.
     pub to: String,
@@ -41,8 +41,8 @@ pub struct SendEmailArgs {
 }
 
 #[tool_router(router = email_router, vis = "pub(crate)")]
-impl Manu {
-    /// Create a new email address Manu can send and receive from.
+impl Carl {
+    /// Create a new email address Carl can send and receive from.
     #[tool(
         name = "email_create",
         description = "Create a new managed email address. (Not yet implemented.)"
@@ -54,7 +54,7 @@ impl Manu {
         Err(not_implemented("email_create"))
     }
 
-    /// List the email addresses Manu currently manages.
+    /// List the email addresses Carl currently manages.
     #[tool(
         name = "email_list",
         description = "List managed email addresses. (Not yet implemented.)"

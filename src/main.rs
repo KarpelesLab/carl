@@ -1,4 +1,4 @@
-//! Manu — a multipurpose MCP helper that gives AI agents hands.
+//! Carl — a multipurpose MCP helper that gives AI agents hands.
 //!
 //! Runs as a local process speaking the Model Context Protocol over stdio. The
 //! protocol owns stdout, so all logging goes to stderr (configurable via the
@@ -13,7 +13,7 @@ use anyhow::Result;
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
-use crate::{config::Config, server::Manu};
+use crate::{config::Config, server::Carl};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,9 +27,9 @@ async fn main() -> Result<()> {
         .init();
 
     let config = Config::from_env();
-    tracing::info!(data_dir = %config.data_dir.display(), "starting manu");
+    tracing::info!(data_dir = %config.data_dir.display(), "starting carl");
 
-    let service = Manu::new(config)
+    let service = Carl::new(config)
         .serve(stdio())
         .await
         .inspect_err(|e| tracing::error!(error = ?e, "failed to start MCP server"))?;

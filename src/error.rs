@@ -2,7 +2,7 @@
 //!
 //! Tool handlers return [`rmcp::ErrorData`] (`McpError`) on failure. To keep
 //! feature code terse, this module provides small constructors for the cases
-//! Manu hits most often.
+//! Carl hits most often.
 
 use rmcp::ErrorData as McpError;
 

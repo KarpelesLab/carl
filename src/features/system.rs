@@ -1,21 +1,21 @@
 //! System feature: always-on introspection tools.
 //!
-//! These tools have no side effects and let an agent discover what Manu can do
+//! These tools have no side effects and let an agent discover what Carl can do
 //! and confirm the connection is healthy.
 
 use rmcp::{ErrorData as McpError, model::CallToolResult, model::Content, tool, tool_router};
 use serde_json::json;
 
-use crate::server::Manu;
+use crate::server::Carl;
 
 #[tool_router(router = system_router, vis = "pub(crate)")]
-impl Manu {
-    /// Report Manu's version and the status of each feature area.
+impl Carl {
+    /// Report Carl's version and the status of each feature area.
     #[tool(
-        name = "manu_status",
-        description = "Report Manu's version and which feature areas are available. Call this first to learn what actions you can take."
+        name = "carl_status",
+        description = "Report Carl's version and which feature areas are available. Call this first to learn what actions you can take."
     )]
-    fn manu_status(&self) -> Result<CallToolResult, McpError> {
+    fn carl_status(&self) -> Result<CallToolResult, McpError> {
         let status = json!({
             "name": env!("CARGO_PKG_NAME"),
             "version": env!("CARGO_PKG_VERSION"),
@@ -32,8 +32,8 @@ impl Manu {
     }
 
     /// Liveness check.
-    #[tool(name = "manu_ping", description = "Health check; returns \"pong\".")]
-    fn manu_ping(&self) -> Result<CallToolResult, McpError> {
+    #[tool(name = "carl_ping", description = "Health check; returns \"pong\".")]
+    fn carl_ping(&self) -> Result<CallToolResult, McpError> {
         Ok(CallToolResult::success(vec![Content::text("pong")]))
     }
 }

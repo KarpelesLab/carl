@@ -14,9 +14,9 @@ use rmcp::{
 };
 use serde::Deserialize;
 
-use crate::{error::not_implemented, server::Manu};
+use crate::{error::not_implemented, server::Carl};
 
-/// Arguments for [`Manu::wallet_send`].
+/// Arguments for [`Carl::wallet_send`].
 // Fields define the tool's JSON schema (via serde/schemars); they are wired to
 // real logic when the handler is implemented.
 #[allow(dead_code)]
@@ -39,7 +39,7 @@ pub struct AssetArgs {
 }
 
 #[tool_router(router = wallet_router, vis = "pub(crate)")]
-impl Manu {
+impl Carl {
     /// Return the spendable balance for an asset.
     #[tool(
         name = "wallet_balance",

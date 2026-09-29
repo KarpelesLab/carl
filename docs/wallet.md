@@ -31,7 +31,7 @@ Likely additions: `wallet_assets` (list supported/held assets), `wallet_history`
   chain-agnostic (`asset` symbol); the backend needs a chain abstraction
   (address formats, fee models, finality, decimals).
 - **Key management.** Where do keys live and how are they protected? Options:
-  OS keychain, an encrypted keystore under `MANU_DATA_DIR`, a hardware signer,
+  OS keychain, an encrypted keystore under `CARL_DATA_DIR`, a hardware signer,
   or a remote KMS/HSM. Keys must never appear in tool output, logs, or the
   conversation.
 - **Spend authorization.** A `wallet_send` request from the model must not be
@@ -43,7 +43,7 @@ Likely additions: `wallet_assets` (list supported/held assets), `wallet_history`
 
 ## Security requirements (non-negotiable)
 
-- Private keys never leave Manu and never appear in logs/output.
+- Private keys never leave Carl and never appear in logs/output.
 - Every spend is authorized against policy and recorded in an audit log.
 - Amounts use exact decimal arithmetic, never binary floats.
 - Default-deny: an unconfigured wallet cannot send.

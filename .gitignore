@@ -1,8 +1,8 @@
 # Rust build artifacts
 /target
 
-# Local environment / secrets — Manu may hold key material; never commit it
-/.manu
+# Local environment / secrets — Carl may hold key material; never commit it
+/.carl
 *.env
 .env.local
 
