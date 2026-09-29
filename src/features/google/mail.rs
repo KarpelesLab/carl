@@ -68,6 +68,26 @@ pub struct DraftArgs {
     pub reply_to_message_id: Option<String>,
 }
 
+/// Arguments for [`Carl::google_mail_subscribe`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubscribeArgs {
+    /// Linked account whose inbox to watch (email). Optional when only one is
+    /// linked.
+    #[serde(default)]
+    pub account: Option<String>,
+    /// Only deliver mail from these addresses. Recommended: anyone can send
+    /// mail, and each delivery interrupts you.
+    #[serde(default)]
+    pub from: Vec<String>,
+}
+
+/// Arguments for [`Carl::google_mail_unsubscribe`].
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UnsubscribeArgs {
+    /// Account to stop watching (email).
+    pub account: String,
+}
+
 #[tool_router(router = google_mail_router, vis = "pub(crate)")]
 impl Carl {
     #[tool(
@@ -234,6 +254,67 @@ impl Carl {
                 "thread_id": draft["message"]["threadId"],
                 "status": "saved as a draft, not sent: the user can review and send it from Gmail",
             }))
+        })
+        .await
+    }
+
+    #[tool(
+        name = "google_mail_subscribe",
+        description = "Ask to be told about new mail arriving in a linked account's inbox (typically your own address, e.g. carl@…), for this session only; it persists across Carl restarts until you unsubscribe or the session ends. Each new email lands in agent_inbox (wait on it with agent_inbox wait_seconds). If the user started Claude Code with Carl as a channel (`claude --dangerously-load-development-channels server:carl`), you're also woken by a <channel source=\"carl\" kind=\"email\"> event naming only the sender and message id. Use `from` to limit it to expected senders."
+    )]
+    async fn google_mail_subscribe(
+        &self,
+        Parameters(args): Parameters<SubscribeArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(me) = self.session else {
+            return Ok(CallToolResult::error(vec![rmcp::model::Content::text(
+                "subscriptions need the Carl daemon; not available in `carl standalone`",
+            )]));
+        };
+        let agents = self.agents.clone();
+        run(&self.google, move |google| {
+            let account = google.account_for(args.account.as_deref(), Area::Mail)?;
+            let from: Vec<String> = args
+                .from
+                .iter()
+                .map(|f| crate::mailwatch::sender_address(f))
+                .filter(|f| f.contains('@'))
+                .collect();
+            agents.subscribe(me, crate::agents::Subscription { account: account.clone(), from: from.clone() })?;
+            Ok(json!({
+                "subscribed": account,
+                "from": if from.is_empty() { json!("anyone") } else { json!(from) },
+                "delivery": "New inbox mail (from about now on, checked every 30s) goes to your agent_inbox; with Carl enabled as a channel you're also woken by a <channel source=\"carl\" kind=\"email\"> event.",
+                "subscriptions": agents.subscriptions(me),
+            }))
+        })
+        .await
+    }
+
+    #[tool(
+        name = "google_mail_unsubscribe",
+        description = "Stop being told about new mail in a linked account (see google_mail_subscribe)."
+    )]
+    async fn google_mail_unsubscribe(
+        &self,
+        Parameters(args): Parameters<UnsubscribeArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(me) = self.session else {
+            return Ok(CallToolResult::error(vec![rmcp::model::Content::text(
+                "subscriptions need the Carl daemon; not available in `carl standalone`",
+            )]));
+        };
+        let agents = self.agents.clone();
+        run(&self.google, move |_| {
+            let account = args.account.trim().to_ascii_lowercase();
+            let current = agents.subscriptions(me);
+            let key = current
+                .iter()
+                .find(|s| s.account.eq_ignore_ascii_case(&account))
+                .map(|s| s.account.clone())
+                .ok_or_else(|| anyhow::anyhow!("you aren't subscribed to {account}"))?;
+            agents.unsubscribe(me, &key)?;
+            Ok(json!({ "unsubscribed": key, "subscriptions": agents.subscriptions(me) }))
         })
         .await
     }

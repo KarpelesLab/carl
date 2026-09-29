@@ -81,6 +81,37 @@ to My Drive's root or a folder the user owns and hasn't shared, and
 `google_drive_update` only touches owned, unshared Docs and text files.
 Calendar events are created with `sendUpdates=none` and no attendees field.
 
+## New-mail subscriptions
+
+A session can ask to hear about new mail in a linked account's inbox, e.g.
+Carl's own `carl@klb.jp`: `google_mail_subscribe` (optionally only `from`
+certain senders), `google_mail_unsubscribe`. Subscriptions belong to the
+session that asked, and are saved with its state, so they survive daemon
+restarts and updates; they end when the session unsubscribes or disconnects
+cleanly.
+
+The daemon (`mailwatch.rs`) polls each subscribed account every 30s with
+Gmail's history API, remembering its position in `google/watch.json` so mail
+arriving during a restart is still delivered. Each new inbox message goes:
+
+- into each subscriber's `agent_inbox` (summary: from, subject, snippet…),
+  wrapped as untrusted. Works with every client.
+- as a **channel event** to Claude Code sessions that loaded Carl as a
+  channel: `<channel source="carl" kind="email" account="…" message_id="…">`.
+  It wakes the session without polling. It names only the account, the
+  sender's address and the message id, never the subject or body: anyone can
+  send mail, and channel content goes straight into the model's context.
+
+Channels are a Claude Code research preview. Start the session with:
+
+```sh
+claude --dangerously-load-development-channels server:carl
+```
+
+(Carl isn't on the preview's allowlist, hence the development flag; Team and
+Enterprise orgs must also enable channels.) Without it, events are dropped
+silently and the agent relies on `agent_inbox`, e.g. with `wait_seconds`.
+
 ## Untrusted content
 
 Anyone can email the user, invite them to an event, or share a document with

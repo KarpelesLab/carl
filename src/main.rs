@@ -16,6 +16,7 @@ mod error;
 mod features;
 mod google;
 mod ipc;
+mod mailwatch;
 mod server;
 mod shim;
 mod update;

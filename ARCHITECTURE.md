@@ -197,6 +197,7 @@ src/
 ├── update.rs            rsupd self-update (daemon, official builds).
 ├── agents.rs            Registry of connected agents and their inboxes.
 ├── areas.rs             Tool areas: which tools a session exposes.
+├── mailwatch.rs         Polls subscribed inboxes; delivers new mail.
 ├── google/              Google plumbing: OAuth linking, token store, REST.
 │   ├── mod.rs           `Google`: accounts, token refresh, loopback link flow.
 │   ├── oauth.rs         Scopes per area, PKCE, token endpoint calls.

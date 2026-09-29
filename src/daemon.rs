@@ -36,6 +36,7 @@ use crate::{
     agents::Agents,
     config::Config,
     ipc::{self, ClientHello, DaemonHello},
+    mailwatch,
     server::Carl,
     update,
 };
@@ -68,6 +69,12 @@ pub fn run(config: Config) -> Result<()> {
     let carl = Carl::new(config.clone());
     // Saved sessions of shims that died while no daemon ran.
     carl.agents.prune();
+    mailwatch::spawn(
+        carl.google.clone(),
+        carl.agents.clone(),
+        runtime.handle().clone(),
+        config.data_dir.clone(),
+    );
     let sessions = Arc::new(Sessions::new());
     let mut listener = Listener::bind(&config, &handle, &carl, &sessions)?;
     tracing::info!(pid = std::process::id(), socket = %config.socket.display(), "daemon listening");
@@ -294,6 +301,7 @@ fn serve_connection(
     let agents = carl.agents.clone();
     let result = handle.block_on(async move {
         let service = carl.serve(tokio::io::split(server_io)).await?;
+        agents.set_peer(agent.id, service.peer().clone());
         if let Some(info) = service.peer().peer_info() {
             let client = &info.client_info;
             agents.set_client(agent.id, &client.name, &client.version);

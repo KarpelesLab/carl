@@ -109,7 +109,7 @@ only.
 | Area              | Tools                                                           | Default |
 | ----------------- | --------------------------------------------------------------- | ------- |
 | `agents`          | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | on |
-| `google.mail`     | `google_mail_search`, `_read`, `_labels`, `_draft`              | off     |
+| `google.mail`     | `google_mail_search`, `_read`, `_labels`, `_draft`, `_subscribe`, `_unsubscribe` | off |
 | `google.calendar` | `google_calendar_list`, `_events`, `_freebusy`, `_create_event` | off     |
 | `google.drive`    | `google_drive_search`, `_read`, `_create`, `_update`            | off     |
 | `google.contacts` | `google_contacts_search`                                        | off     |
@@ -118,6 +118,13 @@ only.
 
 `CARL_AREAS` (comma-separated, or `all`) sets which areas a session starts
 with, per client: `claude mcp add -e CARL_AREAS=agents,google.mail …`.
+
+A session can also subscribe to new mail (`google_mail_subscribe`), e.g. in an
+address dedicated to Carl. New mail lands in `agent_inbox`, and a Claude Code
+session started with
+`claude --dangerously-load-development-channels server:carl` is woken by it
+directly (Claude Code's [channels](https://code.claude.com/docs/en/channels)
+research preview). See [`docs/google.md`](docs/google.md#new-mail-subscriptions).
 
 **Agents** lets every agent on the machine, whichever client it runs in, say
 what it's working on, see the others (and the directory each started in), and

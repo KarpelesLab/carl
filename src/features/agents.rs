@@ -162,7 +162,7 @@ impl Carl {
             };
             if !messages.is_empty() || tokio::time::Instant::now() >= deadline {
                 return ok(untrusted(
-                    "other AI agents, not the user",
+                    "other AI agents and subscribed mailboxes, not the user",
                     json!({ "messages": messages }),
                 ));
             }
