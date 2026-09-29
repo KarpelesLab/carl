@@ -125,7 +125,7 @@ impl Carl {
 
     #[tool(
         name = "agent_send",
-        description = "Send a message to another agent on this machine (by id or name from agent_list), or to all of them with to='all'. It lands in their agent_inbox. Useful to coordinate: announce changes to shared files, ask who owns something, hand off work. Be concise; never include secrets."
+        description = "Send a message to another agent on this machine (by id or name from agent_list), or to all of them with to='all'. It lands in their agent_inbox, and wakes them at once if their client runs Carl as a channel. Useful to coordinate: announce changes to shared files, ask who owns something, hand off work. Be concise; never include secrets."
     )]
     async fn agent_send(
         &self,
@@ -136,7 +136,12 @@ impl Carl {
             Err(e) => return Ok(e),
         };
         match self.agents.send(me, &args.to, &args.message) {
-            Ok(to) => ok(json!({ "delivered_to": to })),
+            Ok((to, pushes)) => {
+                for push in pushes {
+                    push.send().await;
+                }
+                ok(json!({ "delivered_to": to }))
+            }
             Err(e) => fail(e),
         }
     }

@@ -18,9 +18,7 @@ use std::{
 };
 
 use anyhow::Result;
-use rmcp::model::{CustomNotification, ServerNotification};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tokio::runtime::Handle;
 
 use crate::agents::Agents;
@@ -157,15 +155,7 @@ fn poll(
         let sender = sender_address(mail::header(&message["payload"], "From").unwrap_or(""));
         tracing::info!(account, sender, "new mail for subscribers");
         for push in agents.deliver_email(account, &sender, mail::summary(&message)) {
-            let notification = ServerNotification::CustomNotification(CustomNotification::new(
-                "notifications/claude/channel",
-                Some(json!({ "content": push.content, "meta": push.meta })),
-            ));
-            let peer = push.peer;
-            handle.spawn(async move {
-                // Dropped silently by clients not listening for channels.
-                let _ = peer.send_notification(notification).await;
-            });
+            handle.spawn(push.send());
         }
     }
     Ok(())

@@ -138,10 +138,19 @@ pub fn initial(env: Option<&str>) -> BTreeSet<&'static str> {
     }
 }
 
-/// Areas saved from an earlier session, if they are all still valid.
+/// Areas saved from an earlier session, exactly as they were (not expanded:
+/// a saved `google` is the account tools that came with `google.mail`, not
+/// every Google area), if they are all still valid.
 pub fn restore(saved: &[String]) -> Option<BTreeSet<&'static str>> {
-    let ids: Vec<&str> = saved.iter().map(String::as_str).collect();
-    expand(&ids).ok()
+    let mut out = BTreeSet::new();
+    for id in saved {
+        let area = AREAS.iter().find(|a| a.id == id && a.available)?;
+        out.insert(area.id);
+        if area.id.starts_with("google.") {
+            out.insert("google");
+        }
+    }
+    Some(out)
 }
 
 /// Whether `tool` is visible with `enabled` areas.
@@ -196,5 +205,22 @@ mod tests {
         assert!(visible("carl_status", &enabled));
         assert!(visible("agent_send", &enabled));
         assert!(!visible("google_mail_search", &enabled));
+    }
+
+    #[test]
+    fn restoring_keeps_exactly_the_saved_areas() {
+        let saved: Vec<String> = ["agents", "google", "google.mail"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            restore(&saved).unwrap(),
+            BTreeSet::from(["agents", "google", "google.mail"])
+        );
+        assert!(restore(&["wallet".to_string()]).is_none(), "unavailable");
+        assert!(restore(&["gone".to_string()]).is_none(), "unknown");
+        assert_eq!(
+            restore(&["google.drive".to_string()]).unwrap(),
+            BTreeSet::from(["google", "google.drive"])
+        );
     }
 }

@@ -537,6 +537,10 @@ fn sessions_resume_after_the_daemon_dies() {
         tools.contains(&"google_drive_read".to_string()),
         "{tools:?}"
     );
+    assert!(
+        !tools.contains(&"google_mail_search".to_string()),
+        "only the areas it had come back: {tools:?}"
+    );
     let (_, me) = client.call(4, "agent_whoami", json!({}));
     assert_eq!(me["name"], "survivor");
     assert_eq!(me["task"], "long job");
@@ -561,4 +565,50 @@ fn an_oversized_log_is_rotated_and_logging_continues() {
             .is_ok_and(|l| l.contains("log rotated") && l.contains("session opened"))
     });
     assert!(fs::metadata(&log).unwrap().len() < 1024 * 1024);
+}
+
+#[test]
+fn agent_messages_are_pushed_as_channel_events() {
+    let data = data_dir("agentpush");
+    let mut a = Client::start(&data);
+    let mut b = Client::start(&data);
+    let (_, me) = b.call(
+        1,
+        "agent_describe",
+        json!({"task": "listening", "name": "listener"}),
+    );
+    assert_eq!(me["name"], "listener");
+    let (_, whoami) = a.call(1, "agent_whoami", json!({}));
+
+    let (err, _) = a.call(
+        2,
+        "agent_send",
+        json!({"to": "listener", "message": "build is green"}),
+    );
+    assert!(!err);
+    let event = b.notification();
+    assert_eq!(event["method"], "notifications/claude/channel", "{event}");
+    let content = event["params"]["content"].as_str().unwrap();
+    assert!(content.contains("build is green"), "{content}");
+    assert!(content.contains("not the user"), "{content}");
+    assert_eq!(event["params"]["meta"]["kind"], "agent_message");
+    assert_eq!(event["params"]["meta"]["from_id"], whoami["id"].to_string());
+
+    // Long messages are clipped in the event; the inbox has them whole.
+    let long = "x".repeat(3000);
+    a.call(3, "agent_send", json!({"to": "listener", "message": long}));
+    let content = b.notification()["params"]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        content.contains("truncated") && content.len() < 2600,
+        "{}",
+        content.len()
+    );
+    let (_, inbox) = b.call(2, "agent_inbox", json!({}));
+    assert_eq!(
+        inbox["data"]["messages"][1]["text"].as_str().unwrap().len(),
+        3000
+    );
 }

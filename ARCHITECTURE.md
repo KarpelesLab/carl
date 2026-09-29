@@ -107,8 +107,10 @@ whatever MCP client it comes from (Claude Code, Codex, …):
   optionally a unique name. The server instructions ask agents to call it when
   they start a task.
 - **Messaging:** `agent_send` queues a message for an id, a name, or `all`.
-  `agent_inbox` drains the caller's inbox and can long-poll up to 120s. MCP
-  can't push into a model's context, so receiving is always a tool call.
+  `agent_inbox` drains the caller's inbox and can long-poll up to 120s.
+  Sessions whose Claude Code loaded Carl as a channel are also woken at once
+  by a `notifications/claude/channel` event carrying the message (clipped to
+  2000 characters, labeled as not from the user); other clients poll.
 - **Trust:** messages are returned wrapped as untrusted. Another agent is not
   the user, and a message never authorizes anything.
 - The session's `Carl` knows its agent id (`Carl::for_session`); in
