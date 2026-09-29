@@ -82,7 +82,8 @@ impl Carl {
                 + Self::google_mail_router()
                 + Self::google_calendar_router()
                 + Self::google_drive_router()
-                + Self::google_contacts_router(),
+                + Self::google_contacts_router()
+                + Self::google_meet_router(),
         }
     }
 
@@ -247,6 +248,11 @@ mod tests {
             "google_drive_slides_create",
             "google_drive_slides_edit",
             "google_contacts_search",
+            "google_meet_create",
+            "google_meet_conferences",
+            "google_meet_participants",
+            "google_meet_transcript",
+            "google_meet_recordings",
         ];
         for tool in expected {
             assert!(names.contains(&tool.to_string()), "missing tool {tool}");

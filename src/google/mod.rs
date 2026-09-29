@@ -145,7 +145,7 @@ impl Google {
                 "no Google OAuth client configured. Have the user create one \
                  (Google Cloud console → APIs & Services → Credentials → Create \
                  OAuth client ID → Desktop app; enable the Gmail, Calendar, Drive, \
-                 Sheets, Slides and People APIs), then pass its JSON file to google_set_client"
+                 Sheets, Slides, Meet REST and People APIs), then pass its JSON file to google_set_client"
             ),
         };
         let listener = TcpListener::bind("127.0.0.1:0").context("opening a loopback port")?;
@@ -262,7 +262,7 @@ impl Google {
                 ),
             },
         };
-        if !account.scopes.iter().any(|s| s == area.scope()) {
+        if !area.granted_by(&account.scopes) {
             bail!(
                 "{} hasn't granted Carl {} access; call google_link with areas [\"{}\"] \
                  (and login_hint \"{}\") to add it",
@@ -707,7 +707,7 @@ mod tests {
                     owner: Owner::User,
                     refresh_token: "rt".into(),
                     client_id: "123.apps.googleusercontent.com".into(),
-                    scopes: vec![Area::Mail.scope().into()],
+                    scopes: vec![Area::Mail.scopes()[0].into()],
                     linked_at: 0,
                 })
                 .unwrap();

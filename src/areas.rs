@@ -24,7 +24,7 @@ pub const AREAS: &[Area] = &[
     },
     Area {
         id: "google",
-        description: "Link and manage Google accounts. Enabled with any google.* area.",
+        description: "Link and manage Google accounts. Enabled with any google.* area. Linking again with more areas (e.g. meet) adds them.",
         available: true,
     },
     Area {
@@ -45,6 +45,11 @@ pub const AREAS: &[Area] = &[
     Area {
         id: "google.contacts",
         description: "Google Contacts: search.",
+        available: true,
+    },
+    Area {
+        id: "google.meet",
+        description: "Google Meet: create meeting links, past meetings, participants, transcripts, recordings.",
         available: true,
     },
     Area {
@@ -71,6 +76,7 @@ pub fn area_of(tool: &str) -> Option<&'static str> {
         ("google_calendar_", "google.calendar"),
         ("google_drive_", "google.drive"),
         ("google_contacts_", "google.contacts"),
+        ("google_meet_", "google.meet"),
         ("google_", "google"),
         ("wallet_", "wallet"),
         ("email_", "email"),
@@ -162,7 +168,7 @@ mod tests {
     #[test]
     fn expanding_areas() {
         let google = expand(&["google"]).unwrap();
-        assert_eq!(google.len(), 5, "{google:?}");
+        assert_eq!(google.len(), 6, "{google:?}");
         let mail = expand(&["google.mail"]).unwrap();
         assert_eq!(mail, BTreeSet::from(["google", "google.mail"]));
         assert!(expand(&["wallet"]).unwrap_err().contains("isn't available"));

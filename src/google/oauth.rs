@@ -23,7 +23,7 @@ const IDENTITY_SCOPES: [&str; 2] = ["openid", "email"];
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Area {
-    /// Gmail: read, search, label, draft.
+    /// Gmail: read, search, label, draft, send.
     Mail,
     /// Google Calendar.
     Calendar,
@@ -31,20 +31,32 @@ pub enum Area {
     Drive,
     /// Google Contacts (read-only).
     Contacts,
+    /// Google Meet: create meetings, read past meetings and transcripts.
+    Meet,
 }
 
 impl Area {
-    pub const ALL: [Area; 4] = [Area::Mail, Area::Calendar, Area::Drive, Area::Contacts];
+    pub const ALL: [Area; 5] = [
+        Area::Mail,
+        Area::Calendar,
+        Area::Drive,
+        Area::Contacts,
+        Area::Meet,
+    ];
 
-    /// The OAuth scope granting this area. Broader than what Carl's tools use
-    /// today (e.g. Gmail send, Drive sharing): Carl, not the token, is what
-    /// limits the agent, and later tools won't need the user to link again.
-    pub fn scope(self) -> &'static str {
+    /// The OAuth scopes granting this area. Broader than what Carl's tools
+    /// use today: Carl, not the token, is what limits the agent, and later
+    /// tools won't need the user to link again.
+    pub fn scopes(self) -> &'static [&'static str] {
         match self {
-            Area::Mail => "https://www.googleapis.com/auth/gmail.modify",
-            Area::Calendar => "https://www.googleapis.com/auth/calendar",
-            Area::Drive => "https://www.googleapis.com/auth/drive",
-            Area::Contacts => "https://www.googleapis.com/auth/contacts.readonly",
+            Area::Mail => &["https://www.googleapis.com/auth/gmail.modify"],
+            Area::Calendar => &["https://www.googleapis.com/auth/calendar"],
+            Area::Drive => &["https://www.googleapis.com/auth/drive"],
+            Area::Contacts => &["https://www.googleapis.com/auth/contacts.readonly"],
+            Area::Meet => &[
+                "https://www.googleapis.com/auth/meetings.space.created",
+                "https://www.googleapis.com/auth/meetings.space.readonly",
+            ],
         }
     }
 
@@ -54,7 +66,13 @@ impl Area {
             Area::Calendar => "calendar",
             Area::Drive => "drive",
             Area::Contacts => "contacts",
+            Area::Meet => "meet",
         }
+    }
+
+    /// Whether `granted` scopes cover this area.
+    pub fn granted_by(self, granted: &[String]) -> bool {
+        self.scopes().iter().all(|s| granted.iter().any(|g| g == s))
     }
 }
 
@@ -62,7 +80,7 @@ impl Area {
 pub fn areas_of(scopes: &[String]) -> Vec<&'static str> {
     Area::ALL
         .into_iter()
-        .filter(|a| scopes.iter().any(|s| s == a.scope()))
+        .filter(|a| a.granted_by(scopes))
         .map(Area::name)
         .collect()
 }
@@ -83,7 +101,7 @@ pub fn auth_url(
 ) -> String {
     let scopes: Vec<&str> = IDENTITY_SCOPES
         .into_iter()
-        .chain(areas.iter().map(|a| a.scope()))
+        .chain(areas.iter().flat_map(|a| a.scopes().iter().copied()))
         .collect();
     let scope = scopes.join(" ");
     let challenge = challenge(verifier);
@@ -256,8 +274,9 @@ mod tests {
     fn areas_from_granted_scopes() {
         let scopes = vec![
             "openid".to_string(),
-            Area::Drive.scope().to_string(),
-            Area::Mail.scope().to_string(),
+            Area::Drive.scopes()[0].to_string(),
+            Area::Mail.scopes()[0].to_string(),
+            Area::Meet.scopes()[0].to_string(),
         ];
         assert_eq!(areas_of(&scopes), ["mail", "drive"]);
     }
