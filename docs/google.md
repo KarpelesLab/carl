@@ -66,20 +66,30 @@ files directly. Real isolation needs agents sandboxed from Carl's data dir
 
 ## Scopes and what Carl does with them
 
-| Area     | Scope                   | Tools today                                      | Waits for approvals (Paul)        |
-| -------- | ----------------------- | ------------------------------------------------ | --------------------------------- |
-| mail     | `gmail.modify`          | search, read, labels, **drafts**, label changes (archive, read, not spam…) | send, delete |
-| calendar | `calendar`              | list, events, free/busy, create (primary, no guests) | invite, RSVP, edit, delete    |
-| drive    | `drive`                 | search, read as text, create/update private files | share, delete, edit shared files |
-| contacts | `contacts.readonly`     | search                                           | —                                 |
+The rule until the approvals layer (Paul) exists:
 
-The scopes are broader than today's tools on purpose: Carl, not the token, is
+- **Affects only the user's own mailbox, calendar or drive**: allowed on any
+  account (read, draft, label, private events and files).
+- **Reaches other people** (sending, inviting, RSVPing, sharing, changing
+  anything others see): only from accounts dedicated to Carl (`owner` =
+  `carl`). From the user's account, tools refuse and point to drafts.
+- **Deleting**: to the trash only, never permanently.
+- **Local files**: Carl never reads or writes paths an agent picks. Uploads
+  and attachments are passed as content; downloads land in
+  `~/Downloads/carl/` (0600, never overwriting).
+
+| Area     | Scope               | Any account | Carl-owned accounts only |
+| -------- | ------------------- | ----------- | ------------------------ |
+| mail     | `gmail.modify`      | search (paged), read, attachments, labels (archive, read, not spam…), drafts | send, send drafts, trash |
+| calendar | `calendar`          | list, events, free/busy, get; create/update/delete own guest-less events on the primary calendar | guests & invitations, other calendars, RSVP, events others see |
+| drive    | `drive`             | search (paged), read as text, download/export, Sheets ranges read; create/update/move/trash own unshared files, Sheets write on them | share/unshare, changing files others can see |
+| contacts | `contacts.readonly` | search | — |
+
+Sheets tools use the Sheets API, which must be enabled in the OAuth
+client's Cloud project along with the Gmail, Calendar, Drive and People APIs.
+
+The scopes are broader than some tools on purpose: Carl, not the token, is
 what limits the agent, and new tools shouldn't make the user link again.
-
-"Private" is enforced by Carl, not Google: `google_drive_create` only writes
-to My Drive's root or a folder the user owns and hasn't shared, and
-`google_drive_update` only touches owned, unshared Docs and text files.
-Calendar events are created with `sendUpdates=none` and no attendees field.
 
 ## New-mail subscriptions
 

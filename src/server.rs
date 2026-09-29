@@ -234,6 +234,15 @@ mod tests {
             "google_drive_read",
             "google_drive_create",
             "google_drive_update",
+            "google_drive_download",
+            "google_drive_create_folder",
+            "google_drive_move",
+            "google_drive_trash",
+            "google_drive_permissions",
+            "google_drive_share",
+            "google_drive_unshare",
+            "google_drive_sheet_read",
+            "google_drive_sheet_write",
             "google_contacts_search",
         ];
         for tool in expected {

@@ -75,15 +75,17 @@ In Claude Code, `/mcp` shows whether Carl is connected.
 ### 4. Link your Google account (optional)
 
 Carl can search and read your Gmail, Calendar, Drive (Docs, Sheets, Slides)
-and Contacts, and create things only you see: email **drafts** (never sent),
-events without guests, and private files. Sending, inviting and sharing come
-later, with approvals.
+and Contacts, and change things only you see: email drafts and labels,
+events without guests, private files and sheets. Sending, inviting and
+sharing are allowed only from accounts dedicated to Carl (like a
+`carl@yourdomain` mailbox, marked with `carl google owner <email> carl`)
+until approvals exist; see [`docs/google.md`](docs/google.md).
 
 For now you bring your own Google OAuth client, once:
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a
-   project and enable the **Gmail**, **Google Calendar**, **Google Drive** and
-   **People** APIs.
+   project and enable the **Gmail**, **Google Calendar**, **Google Drive**,
+   **Google Sheets** and **People** APIs.
 2. Set up the OAuth consent screen (External) and **publish it** ("In
    production"); otherwise Google expires your link every 7 days.
 3. Credentials → Create credentials → OAuth client ID → **Desktop app**.
@@ -109,9 +111,9 @@ only.
 | Area              | Tools                                                           | Default |
 | ----------------- | --------------------------------------------------------------- | ------- |
 | `agents`          | `agent_describe`, `agent_whoami`, `agent_list`, `agent_send`, `agent_inbox` | on |
-| `google.mail`     | `google_mail_search`, `_read`, `_labels`, `_draft`, `_modify_labels`, `_subscribe`, `_unsubscribe` | off |
-| `google.calendar` | `google_calendar_list`, `_events`, `_freebusy`, `_create_event` | off     |
-| `google.drive`    | `google_drive_search`, `_read`, `_create`, `_update`            | off     |
+| `google.mail`     | `google_mail_search`, `_read`, `_attachment`, `_labels`, `_modify_labels`, `_draft`, `_drafts`, `_send`, `_send_draft`, `_trash`, `_subscribe`, `_unsubscribe` | off |
+| `google.calendar` | `google_calendar_list`, `_events`, `_get_event`, `_freebusy`, `_create_event`, `_update_event`, `_delete_event`, `_respond` | off |
+| `google.drive`    | `google_drive_search`, `_read`, `_download`, `_create`, `_update`, `_create_folder`, `_move`, `_trash`, `_permissions`, `_share`, `_unshare`, `_sheet_read`, `_sheet_write` | off |
 | `google.contacts` | `google_contacts_search`                                        | off     |
 | `google`          | all of the above, plus account tools (`google_link`, …), which come with any `google.*` area | off |
 | `wallet`, `email` | not available yet                                               | —       |
