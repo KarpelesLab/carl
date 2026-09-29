@@ -40,6 +40,9 @@ const LINK_TTL: Duration = Duration::from_secs(10 * 60);
 /// Refresh access tokens this long before they expire.
 const TOKEN_MARGIN: Duration = Duration::from_secs(60);
 
+/// Waits before retrying a rate-limited call, as Google asks.
+const RATE_LIMIT_BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(3)];
+
 /// Per-request limit for Google API calls.
 const API_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -306,7 +309,9 @@ impl Google {
         url: &str,
         body: Option<(String, Vec<u8>)>,
     ) -> Result<rsurl::Response> {
-        for attempt in 0..2 {
+        let mut refreshed = false;
+        let mut backoff = RATE_LIMIT_BACKOFF.iter();
+        loop {
             let token = self.access_token(account)?;
             let mut req = rsurl::Request::new(method, url)?
                 .header("Authorization", &format!("Bearer {token}"))
@@ -317,9 +322,17 @@ impl Google {
                 req = req.header("Content-Length", "0");
             }
             let resp = req.send().context("contacting Google")?;
-            if resp.status == 401 && attempt == 0 {
+            if resp.status == 401 && !refreshed {
                 // Revoked early, or our clock is off: refresh once and retry.
                 self.tokens.lock().unwrap().remove(account);
+                refreshed = true;
+                continue;
+            }
+            if is_rate_limited(&resp)
+                && let Some(wait) = backoff.next()
+            {
+                tracing::debug!(account, ?wait, "rate limited by Google, retrying");
+                std::thread::sleep(*wait);
                 continue;
             }
             if !(200..300).contains(&resp.status) {
@@ -327,7 +340,6 @@ impl Google {
             }
             return Ok(resp);
         }
-        unreachable!()
     }
 
     fn access_token(&self, email: &str) -> Result<String> {
@@ -565,6 +577,19 @@ fn list(accounts: &[Account]) -> String {
         .map(|a| a.email.as_str())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Google's "slow down" answers: 429, or 403 with a rate-limit reason.
+fn is_rate_limited(resp: &rsurl::Response) -> bool {
+    if resp.status == 429 {
+        return true;
+    }
+    resp.status == 403 && {
+        let body = String::from_utf8_lossy(&resp.body);
+        body.contains("rateLimitExceeded")
+            || body.contains("userRateLimitExceeded")
+            || body.contains("Rate Limit Exceeded")
+    }
 }
 
 /// Turn a Google API error response into a readable error.
