@@ -47,6 +47,14 @@ Quick MCP smoke test (handshake + a tool call) is in `README.md`.
 - Code must also build for fullrust (static, libc-free): use `std`/`rustix`,
   never `libc` or C dependencies.
 
+## Releases
+
+Push a `v*` tag (after bumping the version in `Cargo.toml`): CI builds the
+fullrust binary with `--features auto-update`, signs it (`RSUPD_IDENTITY`
+secret), and publishes it via rsupd; running daemons pick it up within the
+hour. Never change the fingerprint in `rsupd_updater()` (`src/main.rs`)
+unless rotating the signing key on purpose — it is what installed copies trust.
+
 ## Security posture
 
 Carl is the trust boundary between the model and the real world. Sensitive
@@ -65,4 +73,4 @@ the codebase (see `docs/wallet.md`).
 ## Git
 
 Remote is `origin` (`github.com:KarpelesLab/carl`). Commit or push only when
-asked. Default branch for PRs is `main`.
+asked. The default branch is `master`.

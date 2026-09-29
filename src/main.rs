@@ -15,6 +15,7 @@ mod features;
 mod ipc;
 mod server;
 mod shim;
+mod update;
 
 use std::process::ExitCode;
 
@@ -51,6 +52,22 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The daemon's updater (see [`update`]). The fingerprint is the trust anchor:
+/// a hash of Carl's release signing key (`rsupd id export --project carl`).
+/// Only releases signed by that key are installed, wherever they come from.
+#[cfg(feature = "auto-update")]
+fn rsupd_updater() -> rsupd::Result<rsupd::Updater> {
+    rsupd::Updater::builder(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+        .fingerprint_hex("d634418a64960aac1580b5f50c0adf5f9b88fafb192f08ea52442ac9ba9f1c9a")
+        .channel(env!("RSUPD_CHANNEL"))
+        .git_tag(env!("RSUPD_GIT_TAG"))
+        .date_tag(rsupd::date_tag_from_unix(env!("RSUPD_BUILD_UNIX")))
+        // The daemon restarts by exiting and letting its shims start the new
+        // build, not by rsupd re-executing it.
+        .auto_restart(false)
+        .build()
 }
 
 /// Serve MCP over stdio in this process, bypassing the daemon.

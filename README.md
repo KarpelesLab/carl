@@ -97,6 +97,7 @@ Carl reads its configuration from the environment:
 | `CARL_DATA_DIR` | `$XDG_DATA_HOME/carl` (`~/.local/share/carl`) | Where Carl persists state (keystore). When set, the daemon log goes here too |
 | `CARL_IDLE_TIMEOUT` | `60`              | Seconds the daemon lingers with no agent connected |
 | `CARL_SOCKET`   | `/tmp/carl-<uid>/<hash>.sock` | Daemon socket (one per data dir) |
+| `CARL_NO_UPDATE` | unset                | Set to disable self-update (official builds only) |
 | `RUST_LOG`      | `info`                | Log filter (logs go to **stderr**; the daemon's to `$XDG_STATE_HOME/carl/daemon.log`, i.e. `~/.local/state/carl`) |
 
 ## Roadmap

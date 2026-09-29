@@ -1,0 +1,101 @@
+name: Build
+
+# Every push: lint and test natively, then build and test the release binary
+# with fullrust (static, libc-free, runs on any x86_64 Linux). On a `v*` tag,
+# also sign that binary and publish it with rsupd, so running Carl daemons
+# update themselves to it.
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets --features auto-update -- -D warnings
+      - run: cargo test --locked
+
+  # The release binary, uploaded as an artifact named after its target triple:
+  # the layout `rsupd publish --ci` consumes. No `--locked`: the image's
+  # ecosystem [patch] (rustix, mio, tokio, … forks) changes the resolution.
+  fullrust:
+    name: x86_64-unknown-linux-fullrust
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test
+        uses: KarpelesLab/fullrust@master
+        with:
+          command: test
+          args: --release --features auto-update
+          # 1.98+ has std::os::unix and the ecosystem forks Carl needs.
+          image: ghcr.io/karpeleslab/fullrust:1.98
+
+      - name: Build
+        uses: KarpelesLab/fullrust@master
+        with:
+          args: --release --features auto-update
+          image: ghcr.io/karpeleslab/fullrust:1.98
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86_64-unknown-linux-fullrust
+          path: target/x86_64-unknown-linux-fullrust/release/carl
+          if-no-files-found: error
+
+  # Sign and upload the release. Needs the RSUPD_IDENTITY secret (base64 of
+  # ~/.config/rsupd/carl/identity.bin). The channel is pinned to `master`, the
+  # default channel release builds embed (a tag checkout has no branch).
+  publish:
+    name: publish
+    needs: [test, fullrust]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install rsupd
+        run: cargo install rsupd --locked --version 0.3.5 --features _cli
+
+      - name: Build, sign and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RSUPD_IDENTITY: ${{ secrets.RSUPD_IDENTITY }}
+        run: rsupd publish --ci --run ${{ github.run_id }} --channel master --yes

@@ -36,6 +36,7 @@ use crate::{
     config::Config,
     ipc::{self, ClientHello, DaemonHello},
     server::Carl,
+    update,
 };
 
 /// How long a starting daemon waits for the lock. A daemon that is shutting
@@ -68,7 +69,15 @@ pub fn run(config: Config) -> Result<()> {
     let mut listener = Listener::bind(&config, &handle, &carl, &sessions)?;
     tracing::info!(pid = std::process::id(), socket = %config.socket.display(), "daemon listening");
 
-    while !sessions.wait_idle(config.idle_timeout, config.health_interval) {
+    // A new build replaced our binary: exit, and let our shims start it.
+    let update_sessions = sessions.clone();
+    update::spawn(move || update_sessions.request_exit("updated"));
+
+    let reason = loop {
+        if let Wake::Exit(reason) = sessions.wait(config.idle_timeout, config.health_interval) {
+            break reason;
+        }
+
         // The lock file was deleted or replaced (say, `rm -rf` of the data
         // dir). Take the lock again on whatever is there now, unless a newer
         // daemon already holds it: then that one owns the keystore, and we
@@ -91,7 +100,7 @@ pub fn run(config: Config) -> Result<()> {
             listener.close();
             listener = Listener::bind(&config, &handle, &carl, &sessions)?;
         }
-    }
+    };
 
     // Remove the socket before releasing the lock (on exit), so a shim never
     // connects to a daemon that is going away without being able to start a
@@ -99,7 +108,7 @@ pub fn run(config: Config) -> Result<()> {
     if listener.is_current()? {
         let _ = fs::remove_file(&config.socket);
     }
-    tracing::info!("idle, exiting");
+    tracing::info!(reason, "exiting");
     runtime.shutdown_background();
     Ok(())
 }
@@ -282,11 +291,12 @@ fn serve_connection(
     result
 }
 
-/// Live-session bookkeeping, for idle exit and log correlation.
+/// Live-session bookkeeping, for idle exit and log correlation. Also where
+/// the main thread sleeps between health checks.
 struct Sessions {
     state: Mutex<SessionState>,
-    /// Signalled when a session closes.
-    closed: Condvar,
+    /// Signalled when a session closes or an exit is requested.
+    changed: Condvar,
 }
 
 struct SessionState {
@@ -294,6 +304,16 @@ struct SessionState {
     active: usize,
     /// When `active` last dropped to zero (or daemon start).
     idle_since: Instant,
+    /// Set by [`Sessions::request_exit`].
+    exit: Option<&'static str>,
+}
+
+/// Why [`Sessions::wait`] returned.
+enum Wake {
+    /// Time for the daemon to go, and why.
+    Exit(&'static str),
+    /// Time for a health check.
+    Tick,
 }
 
 impl Sessions {
@@ -303,8 +323,9 @@ impl Sessions {
                 next_id: 1,
                 active: 0,
                 idle_since: Instant::now(),
+                exit: None,
             }),
-            closed: Condvar::new(),
+            changed: Condvar::new(),
         }
     }
 
@@ -316,23 +337,32 @@ impl Sessions {
         SessionGuard { sessions: self, id }
     }
 
-    /// Block until no session has been open for `idle_timeout` (returns
-    /// `true`), or until `max_wait` has passed (returns `false`).
-    fn wait_idle(&self, idle_timeout: Duration, max_wait: Duration) -> bool {
+    /// Make [`wait`](Self::wait) return [`Wake::Exit`] with `reason`.
+    fn request_exit(&self, reason: &'static str) {
+        self.state.lock().unwrap().exit = Some(reason);
+        self.changed.notify_all();
+    }
+
+    /// Block until an exit is requested, no session has been open for
+    /// `idle_timeout`, or `max_wait` has passed.
+    fn wait(&self, idle_timeout: Duration, max_wait: Duration) -> Wake {
         let deadline = Instant::now() + max_wait;
         let mut state = self.state.lock().unwrap();
         loop {
+            if let Some(reason) = state.exit {
+                return Wake::Exit(reason);
+            }
             let idle_left = (state.active == 0)
                 .then(|| idle_timeout.saturating_sub(state.idle_since.elapsed()));
             if idle_left == Some(Duration::ZERO) {
-                return true;
+                return Wake::Exit("idle");
             }
             let now = Instant::now();
             if now >= deadline {
-                return false;
+                return Wake::Tick;
             }
             let wait = idle_left.map_or(deadline - now, |left| left.min(deadline - now));
-            state = self.closed.wait_timeout(state, wait).unwrap().0;
+            state = self.changed.wait_timeout(state, wait).unwrap().0;
         }
     }
 }
@@ -348,7 +378,7 @@ impl Drop for SessionGuard<'_> {
         state.active -= 1;
         if state.active == 0 {
             state.idle_since = Instant::now();
-            self.sessions.closed.notify_all();
+            self.sessions.changed.notify_all();
         }
     }
 }

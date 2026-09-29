@@ -12,13 +12,13 @@
 use std::{
     collections::HashSet,
     env,
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     io::{self, BufRead, BufReader, Write},
     net::Shutdown,
     os::unix::{fs::OpenOptionsExt, net::UnixStream},
     path::PathBuf,
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -52,6 +52,7 @@ struct Link {
 }
 
 pub fn run(config: Config) -> Result<()> {
+    self_exe().context("locating our own binary")?;
     let (reader, writer) = connect(&config, CONNECT_TIMEOUT)?;
     let link = Arc::new(Mutex::new(Link {
         writer,
@@ -292,15 +293,16 @@ fn spawn_daemon(config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Path of our own binary. Once rsupd has swapped in a new build, the kernel
-/// reports our old inode as "<path> (deleted)", and the new build at `<path>`
-/// is exactly the daemon we want to start.
-fn self_exe() -> io::Result<PathBuf> {
+/// Path of our own binary, as it was when we started. It must be captured
+/// early: an update renames the running binary aside before deleting it, after
+/// which the kernel reports our executable as the renamed, deleted file. The
+/// new build is at the original path, and that is the daemon we want to start.
+static SELF_EXE: OnceLock<PathBuf> = OnceLock::new();
+
+fn self_exe() -> io::Result<&'static PathBuf> {
+    if let Some(exe) = SELF_EXE.get() {
+        return Ok(exe);
+    }
     let exe = env::current_exe()?;
-    Ok(
-        match exe.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
-            Some(path) => PathBuf::from(path),
-            None => exe,
-        },
-    )
+    Ok(SELF_EXE.get_or_init(|| fs::canonicalize(&exe).unwrap_or(exe)))
 }

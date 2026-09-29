@@ -89,19 +89,34 @@ find and message each other.
 
 ### Updates
 
-Releases are built as static, libc-free Linux binaries with
-[fullrust](https://github.com/KarpelesLab/fullrust) and delivered by
-[rsupd](https://github.com/KarpelesLab/rsupd) (not wired in yet):
+Releases are static, libc-free x86_64 Linux binaries built with
+[fullrust](https://github.com/KarpelesLab/fullrust), signed and delivered by
+[rsupd](https://github.com/KarpelesLab/rsupd) (`src/update.rs`).
 
+- **Releasing:** push a `v*` tag. `.github/workflows/build.yml` tests, builds
+  with fullrust, signs the binary with the `RSUPD_IDENTITY` secret, and
+  uploads it on the `master` channel. The fingerprint of that key is compiled
+  into Carl (`rsupd_updater()` in `main.rs`) and is the only thing an update
+  is trusted by. The private key lives in `~/.config/rsupd/carl/` and in that
+  secret, nowhere else.
+- **Official builds only:** the updater is behind the `auto-update` cargo
+  feature, which only CI enables, so a local build never replaces itself.
+  `CARL_NO_UPDATE=1` disables it at runtime.
 - **Only the daemon runs the updater.** A shim restarting would look like the
   server dying to its MCP client, and ten shims would race to swap one binary.
-- rsupd swaps the binary and restarts the daemon, which drops every connection.
-  The shims reconnect and replay (above), so agents carry on. Running shims
-  keep the old code until their agent exits. That is why the hello is
-  versioned and only gains optional fields: **a daemon must accept hellos from
-  older shims.**
+  It checks 60s after start, then hourly.
+- **Restart by exit:** once rsupd has verified and swapped in the new binary,
+  the daemon simply exits (removing its socket). Its shims reconnect, start the
+  new binary from the path they were launched from (captured at startup,
+  because the old file is renamed away and deleted), and replay (above), so
+  agents carry on. If no shim is connected, nothing needs restarting.
+- Running shims keep the old code until their agent exits. That is why the
+  hello is versioned and only gains optional fields: **a daemon must accept
+  hellos from older shims.**
 - Daemon memory does not survive an update. Anything that must (queued
   messages, pending approvals) has to be persisted in `CARL_DATA_DIR`.
+- The binary must be writable by the user running it (e.g. `~/.local/bin`),
+  or the update fails and is retried hourly (logged in `daemon.log`).
 
 ### Local security
 
@@ -188,6 +203,7 @@ section there as it matures.
 
 - **rmcp** — MCP server, macros, and the stdio transport (`transport-io`).
 - **tokio / tokio-util** — async runtime; `SyncIoBridge` for the socket bridge.
+- **rsupd** (optional, `auto-update` feature) — signed self-update.
 - **rustix** — typed syscalls (`setsid`, `getuid`, `SO_PEERCRED`) with no libc,
   so the same code builds for fullrust.
 - **serde / serde_json / schemars** — tool argument (de)serialization and JSON
