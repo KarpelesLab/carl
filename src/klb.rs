@@ -22,7 +22,7 @@ use klbfw::{Client, Config, RestError, Token};
 use serde_json::{Map, Value, json};
 
 pub const CLIENT_ID: &str = "oaap-p6rktp-uzaf-adle-djqw-g27ghobe";
-const HOST: &str = "hub.atonline.com";
+pub const HOST: &str = "hub.atonline.com";
 
 /// How long a login started with `klb_login` waits for the user.
 const LOGIN_TTL: Duration = Duration::from_secs(10 * 60);

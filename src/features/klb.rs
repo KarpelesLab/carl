@@ -113,7 +113,7 @@ impl Carl {
 
     #[tool(
         name = "klb_whoami",
-        description = "Show which KarpelesLab / AtOnline platform account Carl is logged in as (id, email, name), or whether a login is pending."
+        description = "Show which KarpelesLab / AtOnline platform account Carl is logged in as: host, realm (id, plus name and domain when the account may read them), user id, email and name; or whether a login is pending."
     )]
     async fn klb_whoami(&self) -> Result<CallToolResult, McpError> {
         run(&self.klb, |klb| {
@@ -122,8 +122,26 @@ impl Carl {
             }
             let user = klb.with_client(|c| c.do_request("User/@", "GET", json!({})))?;
             let u = user.data.unwrap_or_default();
+            // The realm's name and domain need permission to read the realm;
+            // its id is always known.
+            let realm_id = u["Realm__"].as_str().unwrap_or_default().to_string();
+            let realm = if realm_id.is_empty() {
+                Value::Null
+            } else {
+                let details = klb
+                    .with_client(|c| c.do_request(&format!("Realm/{realm_id}"), "GET", json!({})))
+                    .ok()
+                    .and_then(|r| r.data);
+                json!({
+                    "id": realm_id,
+                    "name": details.as_ref().map(|d| d["Name"].clone()),
+                    "domain": details.as_ref().map(|d| d["Main_Domain"].clone()),
+                })
+            };
             Ok(json!({
                 "logged_in": true,
+                "host": crate::klb::HOST,
+                "realm": realm,
                 "id": u["User__"],
                 "email": u["Email"],
                 "name": u["Display_Name"],
