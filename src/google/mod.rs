@@ -232,10 +232,7 @@ impl Google {
     /// Carl only ever writes files there: an agent must not be able to have
     /// it write anywhere else.
     pub fn save_download(&self, filename: &str, data: &[u8]) -> Result<std::path::PathBuf> {
-        let dir = std::env::var_os("CARL_DOWNLOADS_DIR")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join("Downloads/carl")))
-            .ok_or_else(|| anyhow!("no home directory to download into"))?;
+        let dir = downloads_dir().ok_or_else(|| anyhow!("no home directory to download into"))?;
         save_in(&dir, filename, data)
     }
 
@@ -513,6 +510,13 @@ impl Google {
         tracing::info!(account = email, "google account linked");
         Ok(email)
     }
+}
+
+/// Carl's downloads directory: `$CARL_DOWNLOADS_DIR`, else `~/Downloads/carl`.
+pub fn downloads_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("CARL_DOWNLOADS_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join("Downloads/carl")))
 }
 
 /// Save `data` as `filename` in `dir`, adding " (n)" rather than overwriting.

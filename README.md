@@ -118,6 +118,7 @@ only.
 | `google.contacts` | `google_contacts_search`                                        | off     |
 | `google.meet`     | `google_meet_create`, `_conferences`, `_participants`, `_transcript`, `_recordings` | off |
 | `google`          | all of the above, plus account tools (`google_link`, …), which come with any `google.*` area | off |
+| `klb`             | `klb_login`, `klb_whoami`, `klb_api`, `klb_upload` (KarpelesLab / AtOnline platform) | off |
 | `wallet`, `email` | not available yet                                               | —       |
 
 `CARL_AREAS` (comma-separated, or `all`) sets which areas a session starts

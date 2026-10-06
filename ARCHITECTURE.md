@@ -147,6 +147,17 @@ always visible.
 - Scaffolded areas (`available: false`) can't be enabled, so their
   not-implemented tools stay out of sight.
 
+### KarpelesLab / AtOnline platform (`klb`)
+
+Uses the [`klbfw`](https://crates.io/crates/klbfw) client against
+`hub.atonline.com`. Login is the same polltoken flow as
+`shells-support/login.js` (the agent shows a URL, Carl polls for approval),
+and the token lives in the same file, `~/.config/atonline/auth-<profile>.json`
+(`CARL_KLB_PROFILE`, default `default`), so both share one login. klbfw renews
+expired access tokens; its `on_token_renewed` callback lets Carl save each
+renewal back to that file. `klb_upload` drives klbfw's upload (direct PUT,
+multipart, or S3 multipart for large files).
+
 ### Updates
 
 Releases are static, libc-free x86_64 Linux binaries built with
@@ -208,6 +219,7 @@ src/
 ├── agents.rs            Registry of connected agents and their inboxes.
 ├── areas.rs             Tool areas: which tools a session exposes.
 ├── mailwatch.rs         Polls subscribed inboxes; delivers new mail.
+├── klb.rs               KarpelesLab / AtOnline platform login (klbfw).
 ├── google/              Google plumbing: OAuth linking, token store, REST.
 │   ├── mod.rs           `Google`: accounts, token refresh, loopback link flow.
 │   ├── oauth.rs         Scopes per area, PKCE, token endpoint calls.

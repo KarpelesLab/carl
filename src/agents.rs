@@ -403,6 +403,11 @@ impl Agents {
         Ok(agent.describe(id))
     }
 
+    /// Where agent `id` was started.
+    pub fn cwd(&self, id: u32) -> Option<PathBuf> {
+        self.inner.lock().unwrap().agents.get(&id)?.cwd.clone()
+    }
+
     pub fn whoami(&self, id: u32) -> Result<Value> {
         let inner = self.inner.lock().unwrap();
         let agent = inner

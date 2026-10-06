@@ -7,6 +7,7 @@
 pub mod agents;
 pub mod email;
 pub mod google;
+pub mod klb;
 pub mod system;
 pub mod wallet;
 

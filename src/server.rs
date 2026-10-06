@@ -26,7 +26,7 @@ use rmcp::{
     tool_handler,
 };
 
-use crate::{agents::Agents, areas, config::Config, google::Google};
+use crate::{agents::Agents, areas, config::Config, google::Google, klb::Klb};
 
 /// Instructions surfaced to the agent during MCP initialization. Keep this in
 /// sync with the set of routers composed in [`Carl::new`].
@@ -59,6 +59,8 @@ pub struct Carl {
     pub google: Arc<Google>,
     /// Agents connected to the daemon, shared by every session.
     pub agents: Arc<Agents>,
+    /// The KarpelesLab / AtOnline platform login, shared by every session.
+    pub klb: Arc<Klb>,
     /// The agent this session belongs to; `None` in `carl standalone`.
     pub session: Option<u32>,
     /// Tool areas this session exposes (see [`areas`]). Per session.
@@ -72,6 +74,7 @@ impl Carl {
         Self {
             google: Arc::new(Google::new(&config.data_dir)),
             agents: Arc::new(Agents::new(Some(config.data_dir.join("sessions")))),
+            klb: Arc::new(Klb::new()),
             session: None,
             areas: Arc::new(Mutex::new(areas::initial(config.areas.as_deref()))),
             config: Arc::new(config),
@@ -84,7 +87,8 @@ impl Carl {
                 + Self::google_calendar_router()
                 + Self::google_drive_router()
                 + Self::google_contacts_router()
-                + Self::google_meet_router(),
+                + Self::google_meet_router()
+                + Self::klb_router(),
         }
     }
 
@@ -254,6 +258,10 @@ mod tests {
             "google_meet_participants",
             "google_meet_transcript",
             "google_meet_recordings",
+            "klb_login",
+            "klb_whoami",
+            "klb_api",
+            "klb_upload",
         ];
         for tool in expected {
             assert!(names.contains(&tool.to_string()), "missing tool {tool}");

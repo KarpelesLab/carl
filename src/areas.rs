@@ -53,6 +53,11 @@ pub const AREAS: &[Area] = &[
         available: true,
     },
     Area {
+        id: "klb",
+        description: "KarpelesLab / AtOnline platform (hub.atonline.com): log in, call its REST API, upload files.",
+        available: true,
+    },
+    Area {
         id: "wallet",
         description: "Crypto wallet: balances, addresses, sending. Not available yet.",
         available: false,
@@ -78,6 +83,7 @@ pub fn area_of(tool: &str) -> Option<&'static str> {
         ("google_contacts_", "google.contacts"),
         ("google_meet_", "google.meet"),
         ("google_", "google"),
+        ("klb_", "klb"),
         ("wallet_", "wallet"),
         ("email_", "email"),
     ];
